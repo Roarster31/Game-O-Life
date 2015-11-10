@@ -106,17 +106,29 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc)
   printf( "Processing...\n" );
   for( int y = 0; y < IMHT; y++ ) {   //go through all lines
     for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-//      c_in :> inArray[y][x];                    //read the pixel value
       c_in :> val;
-
-      int intermediary = decode(val);
-
-      //we do all our processing
-      intermediary = intermediary ^ 1;
-
-      c_out <: encode(intermediary); //send some modified pixel out
+      inArray[y][x] = decode(val); //reads in intermediate and inverts
     }
   }
+
+
+  //we do all our processing
+  for( int y = 0; y < IMHT; y++ ) {   //go through all lines
+      for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
+          inArray[y][x] = inArray[y][x] * 7;
+      }
+    }
+
+
+
+
+  //we're all done
+  for( int y = 0; y < IMHT; y++ ) {   //go through all lines
+       for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
+           c_out <: encode(inArray[y][x]); // outputs inverted value
+       }
+     }
+
   printf( "\nOne processing round completed...\n" );
 }
 
