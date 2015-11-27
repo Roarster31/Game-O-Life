@@ -82,6 +82,64 @@ uchar encode(int intermediary) {
     return output;
 }
 
+int getItem(int inArray[IMWD * IMHT], int x, int y) {
+    while (x < 0) {
+        x += IMWD;
+    }
+    while (x >= IMWD) {
+        x -= IMWD;
+    }
+    while (y < 0) {
+        y += IMHT;
+    }
+    while (y >= IMHT) {
+        y -= IMHT;
+    }
+
+//    printf("returning inArray[%d][%d]\n", x, y);
+    return inArray[x * IMWD + y];
+}
+
+int makeDecision(int arr[IMWD * IMHT], int startX, int startY) {
+
+    int liveNeighbours = 0;
+    for( int y = startY - 1; y <= startY + 1; y++ ) {   //go through all lines
+        for( int x = startX - 1; x <= startX + 1; x++ ) { //go through each pixel per line
+          if (!(x == startX && y == startY)) {
+              liveNeighbours += getItem(arr, x, y);
+          }
+        }
+    }
+
+    int live = getItem(arr, startX, startY);
+
+    if (live) {
+        if (liveNeighbours < 2) {
+//          any live cell with fewer than two live neighbours dies
+//            printf("Live cells dies [%d is fewer than 2 live neighbours] (%d,%d)\n", liveNeighbours, startX, startY);
+            return 0;
+        } else if (liveNeighbours > 3) {
+//          any live cell with more than three live neighbours dies
+//            printf("Live cells dies [%d is more than 3 live neighbours] (%d,%d)\n", liveNeighbours, startX, startY);
+            return 0;
+        } else {
+//          any live cell with two or three live neighbours is unaffected
+//            printf("Live cells unaffected (%d,%d)\n", startX, startY);
+            return 1;
+        }
+
+    } else {
+            if (liveNeighbours == 3){
+//          any dead cell with exactly three live neighbours becomes alive
+//            printf("dead cells lives (%d,%d)\n", startX, startY);
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+
 /////////////////////////////////////////////////////////////////////////////////////////
 //
 // Start your implementation by changing this function to implement the game of life
@@ -98,7 +156,8 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc)
   printf( "Waiting for Board Tilt...\n" );
 //  fromAcc :> int value;
 
-  int inArray[IMHT][IMWD];
+  int inArray[IMWD * IMHT];
+  int outArray[IMWD * IMHT];
 
   //Read in and do something with your image values..
   //This just inverts every pixel, but you should
@@ -107,25 +166,46 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc)
   for( int y = 0; y < IMHT; y++ ) {   //go through all lines
     for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
       c_in :> val;
-      inArray[y][x] = decode(val); //reads in intermediate
+      inArray[x * IMWD + y] = decode(val); //reads in intermediate
     }
   }
 
+  int *inArrayPointer = inArray;
+  int *outArrayPointer = outArray;
+
+  int i = 0;
+  while (1) {
+      i++;
 
   //we do all our processing
   for( int y = 0; y < IMHT; y++ ) {   //go through all lines
       for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-          inArray[y][x] = inArray[y][x] * 7;
+          outArrayPointer[x * IMWD + y] = makeDecision(inArrayPointer, x, y);
       }
     }
 
+  printf("\n\n------------ round %d ------------\n\n", i);
 
+  for( int y = 0; y < IMHT; y++ ) {   //go through all lines
+       for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
+         int gotItem = getItem(outArrayPointer, x, y);
+         printf("%d",gotItem);
+       }
+       printf("\n");
+     }
+
+  int * swap = inArrayPointer;
+  inArrayPointer = outArrayPointer;
+  outArrayPointer = swap;
+
+
+  }
 
 
   //we're all done
   for( int y = 0; y < IMHT; y++ ) {   //go through all lines
        for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-           c_out <: encode(inArray[y][x]); // outputs inverted value
+           c_out <: encode(outArray[x * IMWD + y]); // outputs inverted value
        }
      }
 
