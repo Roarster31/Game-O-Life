@@ -32,7 +32,7 @@ on tile[0]: port p_sda = XS1_PORT_1F;
 
 //colour codes
 #define C_OFF 0x0
-#define C_S 0x1
+#define C_OFF_S 0x1
 #define C_BLUE 0x2
 #define C_BLUE_S 0x3
 #define C_GREEN 0x4
@@ -57,28 +57,67 @@ on tile[0] : out port leds = XS1_PORT_4F;   //port to access xCore-200 LEDs
 //
 /////////////////////////////////////////////////////////////////////////////////////////
 
+
+typedef interface LEDInterface {
+  void setSeparate(int enabled);
+  void setMain(int currentRed, int currentGreen, int currentBlue);
+} LEDInterface;
+
 //DISPLAYS an LED pattern
-int showLEDs(out port p, chanend contChan) {
+int showLEDs(out port p, server LEDInterface l_interface[n], unsigned n) {
   int pattern; //1st bit...separate green LED
                //2nd bit...blue LED
                //3rd bit...green LED
                //4th bit...red LED
   while (1) {
-    contChan :> pattern;   //receive new pattern from controller
+      int separateEnabled = 0;
+      int currentRed = 0;
+      int currentGreen = 0;
+      int currentBlue = 0;
+      select{
+          case l_interface[int j].setSeparate(int enabled):
+              break;
+          case l_interface[int j].setMain(int currentRed, int currentGreen, int currentBlue):
+              break;
+      }
+
+
+    pattern = (separateEnabled * 8) | (currentRed * 4) | (currentGreen * 2) | currentBlue;
     p <: pattern;                //send pattern to LED port
   }
   return 0;
 }
 
+typedef interface ButtonInterface {
+  void showInterest();
+} ButtonInterface;
+
 //READ BUTTONS and send button pattern to userAnt
-void buttonListener(in port b, chanend outChan) {
+void buttonListener(in port b, chanend outChan[n], unsigned n, server ButtonInterface b_interface[m], unsigned m) {
   int r;
+  int enabledChannels[2]; //remember to use the same value as used in main because xc is a piece of crap :)
+  for(int i=0; i<n; i++) {
+      enabledChannels[i] = 0;
+  }
+
   while (1) {
-    b when pinseq(15)  :> r;    // check that no button is pressed
-    b when pinsneq(15) :> r;    // check if some buttons are pressed
-    if ((r==13) || (r==14)) {    // if either button is pressed
-        outChan <: r;             // send button pattern to outChan
-    }
+
+      select {
+          case b_interface[int j].showInterest():
+                  enabledChannels[j] = 1;
+                  break;
+          case b when pinsneq(15) :> r:    // check if some buttons are pressed
+              if ((r==13) || (r==14)) {    // if either button is pressed
+                  for(int i=0; i<n; i++) {
+                      if (enabledChannels[i]) {
+                          outChan[i] <: r;             // send button pattern to outChan
+                          enabledChannels[i] = 0;
+                      }
+                  }
+              }
+              break;
+      }
+
   }
 }
 
@@ -137,7 +176,7 @@ uchar encode(int intermediary) {
     return output;
 }
 
-int getItem(int inArray[IMWD * IMHT], int x, int y) {
+unsafe int getItem(int * unsafe inArray, int x, int y) {
     while (x < 0) {
         x += IMWD;
     }
@@ -151,10 +190,12 @@ int getItem(int inArray[IMWD * IMHT], int x, int y) {
         y -= IMHT;
     }
 
+
+
     return inArray[y * IMWD + x];
 }
 
-void setItem(int inArray[IMWD * IMHT], int x, int y, int value) {
+unsafe void setItem(int * unsafe inArray, int x, int y, int value) {
     while (x < 0) {
         x += IMWD;
     }
@@ -171,7 +212,7 @@ void setItem(int inArray[IMWD * IMHT], int x, int y, int value) {
     inArray[y * IMWD + x] = value;
 }
 
-int makeDecision(int arr[IMWD * IMHT], int startX, int startY) {
+unsafe int makeDecision(int * unsafe arr, int startX, int startY) {
 
     int liveNeighbours = 0;
     for( int y = startY - 1; y <= startY + 1; y++ ) {   //go through all lines
@@ -207,10 +248,55 @@ int makeDecision(int arr[IMWD * IMHT], int startX, int startY) {
         }
     }
 
-    return 0;
+    return live;
 }
 
 
+typedef interface ExportInterface {
+    int isExporting();
+    void setCurrentArraypointer(int * unsafe currentDataPointer);
+} ExportInterface;
+
+unsafe void exportServer(chanend c_out, chanend fromButton, client ButtonInterface buttonInterface, server ExportInterface exportInterface, client LEDInterface l_interface) {
+  int currentState = 0;
+  int * unsafe currentDataPointer;
+  while(1) {
+      buttonInterface.showInterest();
+      select {
+          case exportInterface.isExporting() -> int returnVal:
+              printf("exporting query received, sending %d\n",currentState);
+              returnVal = currentState;
+              break;
+          case exportInterface.setCurrentArraypointer(int * unsafe dataPointer):
+                currentDataPointer = dataPointer;
+                  break;
+          case fromButton :> int buttonType:
+              if(buttonType == SW2_CODE) {
+                  printf("Received export request\n");
+
+                  currentState = 1;
+                  printf("starting export process\n");
+                  c_out <: '0';
+                  for( int y = 0; y < IMHT; y++ ) {   //go through all lines
+                       for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
+                           int pointerValue = currentDataPointer[x * IMWD + y];
+                           uchar value = encode(pointerValue); // outputs inverted value
+//                           printf("%d",value);
+                           c_out <: value;
+                       }
+//                       printf("\n");
+                  }
+                  printf("ending export process\n");
+                  currentState = 0;
+
+                  //with UX in mind we'll light up the LED now
+                  l_interface.setMain(0, 0, 1);
+              }
+              buttonInterface.showInterest();
+              break;
+      }
+  }
+}
 /////////////////////////////////////////////////////////////////////////////////////////
 //
 // Start your implementation by changing this function to implement the game of life
@@ -218,19 +304,22 @@ int makeDecision(int arr[IMWD * IMHT], int startX, int startY) {
 // Currently the function just inverts the image
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend fromButton, chanend toLEDs) {
+unsafe void distributor(chanend c_in, chanend fromAcc, chanend fromButton, client ButtonInterface buttonInterface, client LEDInterface l_interface, client ExportInterface exportInterface) {
   uchar val;
 
   //Starting up and wait for tilting of the xCore-200 Explorer
   printf( "ProcessImage:Start, size = %dx%d\n", IMHT, IMWD );
-  printf( "Waiting for Board Tilt...\n" );
+  printf( "Waiting for SW1 click...\n" );
 
   //wait for SW1 to be pressed
   int buttonData = 0;
 
+  buttonInterface.showInterest();
   while (buttonData != SW1_CODE) {
       fromButton :> buttonData;
   }
+
+  l_interface.setMain(0,1,0);
 
   int inArray[IMWD * IMHT];
   int outArray[IMWD * IMHT];
@@ -243,49 +332,61 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend fromButto
     for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
       c_in :> val;
       setItem(inArray, x, y, decode(val)); //reads in intermediate
-
-      toLEDs <: ((x+y) % 2) ? C_GREEN : C_GREEN_S;
     }
   }
 
-  int *inArrayPointer = inArray;
-  int *outArrayPointer = outArray;
-
-  int i = 0;
-  while (1) {
-      i++;
-
-  //we do all our processing
-  for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-      for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-          setItem(outArrayPointer, x, y, makeDecision(inArrayPointer, x, y));
-      }
-    }
-
-  printf("\n\n------------ round %d ------------\n\n", i);
-
-  for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-       for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-         int gotItem = getItem(outArrayPointer, x, y);
-         printf("%d",gotItem);
-       }
-       printf("\n");
-     }
-
-  int * swap = inArrayPointer;
-  inArrayPointer = outArrayPointer;
-  outArrayPointer = swap;
+  int * unsafe inArrayPointer = inArray;
+  int * unsafe outArrayPointer = outArray;
 
 
-  }
+
+          int i = 0;
+          while (1) {
+              i++;
+
+              exportInterface.setCurrentArraypointer(inArrayPointer);
+
+              l_interface.setSeparate(i % 2);
+
+          //we do all our processing
+          for( int y = 0; y < IMHT; y++ ) {   //go through all lines
+              for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
+                  setItem(outArrayPointer, x, y, makeDecision(inArrayPointer, x, y));
+              }
+            }
 
 
-  //we're all done
-  for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-       for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-           c_out <: encode(outArray[x * IMWD + y]); // outputs inverted value
-       }
-     }
+
+
+          printf("\n\n------------ round %d ------------\n\n", i);
+
+          for( int y = 0; y < IMHT; y++ ) {   //go through all lines
+               for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
+                 int gotItem = getItem(outArrayPointer, x, y);
+                 printf("%d",gotItem);
+               }
+               printf("\n");
+             }
+
+          printf("done printing round\n");
+          while(exportInterface.isExporting()) {
+                        //export
+              printf("waiting\n");
+          }
+
+          printf("beginning pointer swap\n");
+          int * unsafe swap = inArrayPointer;
+          inArrayPointer = outArrayPointer;
+          outArrayPointer = swap;
+
+
+          }
+
+
+
+
+
+
 
   printf( "\nOne processing round completed...\n" );
 }
@@ -299,25 +400,32 @@ void DataOutStream(char outfname[], chanend c_in) {
   int res;
   uchar line[ IMWD ];
 
-  //Open PGM file
-  printf( "DataOutStream:Start...\n" );
-  res = _openoutpgm( outfname, IMWD, IMHT );
-  if( res ) {
-    printf( "DataOutStream:Error opening %s\n.", outfname );
-    return;
-  }
 
-  //Compile each line of the image and write the image line-by-line
-  for( int y = 0; y < IMHT; y++ ) {
-    for( int x = 0; x < IMWD; x++ ) {
-      c_in :> line[ x ];
-    }
-    _writeoutline( line, IMWD );
-  }
 
-  //Close the PGM image
-  _closeoutpgm();
-  printf( "DataOutStream:Done...\n" );
+  while(1) {
+
+      c_in :> line[0];
+
+      //Open PGM file
+        printf( "DataOutStream:Start...\n" );
+        res = _openoutpgm( outfname, IMWD, IMHT );
+        if( res ) {
+          printf( "DataOutStream:Error opening %s\n.", outfname );
+          return;
+        }
+
+      //Compile each line of the image and write the image line-by-line
+      for( int y = 0; y < IMHT; y++ ) {
+        for( int x = 0; x < IMWD; x++ ) {
+          c_in :> line[ x ];
+        }
+        _writeoutline( line, IMWD );
+      }
+
+      //Close the PGM image
+      _closeoutpgm();
+      printf( "DataOutStream:Done...\n" );
+  }
   return;
 }
 
@@ -369,22 +477,28 @@ void accelerometer(client interface i2c_master_if i2c, chanend toDist) {
 // Orchestrate concurrent system and start up all threads
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-int main(void) {
+unsafe int main(void) {
 
   i2c_master_if i2c[1];               //interface to accelerometer
 
 //  char infname[] = "test.pgm";     //put your input image path here
 //  char outfname[] = "testout.pgm"; //put your output image path here
-  chan c_inIO, c_outIO, c_control, c_buttons, c_LEDs;    //extend your channel definitions here
+  chan c_inIO, c_outIO, c_control;    //extend your channel definitions here
 
+  chan c_buttons[2];
+
+  interface LEDInterface l_interface[2];
+  interface ButtonInterface b_interface[2];
+  interface ExportInterface exportInterface;
   par {
-      on tile[0]: buttonListener(buttons, c_buttons);
-      on tile[0]: showLEDs(leds,c_LEDs);
+      on tile[0]: buttonListener(buttons, c_buttons, 2, b_interface, 2);
+      on tile[0]: showLEDs(leds, l_interface, 2);
       on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing accelerometer data
       on tile[1]: accelerometer(i2c[0],c_control);        //client thread reading accelerometer data
       on tile[1]: DataInStream("test.pgm", c_inIO);          //thread to read in a PGM image
       on tile[1]: DataOutStream("testout.pgm", c_outIO);       //thread to write out a PGM image
-      on tile[1]: distributor(c_inIO, c_outIO, c_control, c_buttons, c_LEDs);//thread to coordinate work on image
+      on tile[1]: exportServer(c_outIO, c_buttons[0], b_interface[0], exportInterface, l_interface[0]);
+      on tile[1]: distributor(c_inIO, c_control, c_buttons[1], b_interface[1], l_interface[1], exportInterface);//thread to coordinate work on image
   }
 
   return 0;
