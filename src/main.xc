@@ -96,8 +96,24 @@ int getItem(int inArray[IMWD * IMHT], int x, int y) {
         y -= IMHT;
     }
 
-//    printf("returning inArray[%d][%d]\n", x, y);
     return inArray[x * IMWD + y];
+}
+
+void setItem(int inArray[IMWD * IMHT], int x, int y, int value) {
+    while (x < 0) {
+        x += IMWD;
+    }
+    while (x >= IMWD) {
+        x -= IMWD;
+    }
+    while (y < 0) {
+        y += IMHT;
+    }
+    while (y >= IMHT) {
+        y -= IMHT;
+    }
+
+    inArray[x * IMWD + y] = value;
 }
 
 int makeDecision(int arr[IMWD * IMHT], int startX, int startY) {
@@ -154,7 +170,7 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc)
   //Starting up and wait for tilting of the xCore-200 Explorer
   printf( "ProcessImage:Start, size = %dx%d\n", IMHT, IMWD );
   printf( "Waiting for Board Tilt...\n" );
-//  fromAcc :> int value;
+//  fromAcc :> int value; we don't want to wait for the accelerometer, rather SW1
 
   int inArray[IMWD * IMHT];
   int outArray[IMWD * IMHT];
@@ -166,7 +182,7 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc)
   for( int y = 0; y < IMHT; y++ ) {   //go through all lines
     for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
       c_in :> val;
-      inArray[x * IMWD + y] = decode(val); //reads in intermediate
+      setItem(inArray, x, y, decode(val)); //reads in intermediate
     }
   }
 
@@ -180,7 +196,7 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc)
   //we do all our processing
   for( int y = 0; y < IMHT; y++ ) {   //go through all lines
       for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-          outArrayPointer[x * IMWD + y] = makeDecision(inArrayPointer, x, y);
+          setItem(outArrayPointer, x, y, makeDecision(inArrayPointer, x, y));
       }
     }
 
