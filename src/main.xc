@@ -6,14 +6,16 @@
 #include <stdio.h>
 #include "pgmIO.h"
 #include "i2c.h"
+#include <print.h>
+#include <stdlib.h>
 
 #define  IMHT 16                  //image height
 #define  IMWD 16                  //image width
 
 typedef unsigned char uchar;      //using uchar as shorthand
 
-port p_scl = XS1_PORT_1E;         //interface ports to accelerometer
-port p_sda = XS1_PORT_1F;
+on tile[0]: port p_scl = XS1_PORT_1E;         //interface ports to accelerometer
+on tile[0]: port p_sda = XS1_PORT_1F;
 
 #define FXOS8700EQ_I2C_ADDR 0x1E  //register addresses for accelerometer
 #define FXOS8700EQ_XYZ_DATA_CFG_REG 0x0E
@@ -28,6 +30,24 @@ port p_sda = XS1_PORT_1F;
 #define SW1_CODE 0xE
 #define SW2_CODE 0xD
 
+//colour codes
+#define C_OFF 0x0
+#define C_S 0x1
+#define C_BLUE 0x2
+#define C_BLUE_S 0x3
+#define C_GREEN 0x4
+#define C_GREEN_S 0x5
+#define C_LGTBLUE 0x6
+#define C_LGTBLUE_S 0x7
+#define C_ORANGE 0x8
+#define C_ORANGE_S 0x9
+#define C_PURPLE 0xA
+#define C_PURPLE_S 0xB
+#define C_YELLOW 0xC
+#define C_YELLOW_S 0xD
+#define C_WHITE 0xE
+#define C_WHITE_S 0xF
+
 on tile[0] : in port buttons = XS1_PORT_4E; //port to access xCore-200 buttons
 on tile[0] : out port leds = XS1_PORT_4F;   //port to access xCore-200 LEDs
 
@@ -38,26 +58,27 @@ on tile[0] : out port leds = XS1_PORT_4F;   //port to access xCore-200 LEDs
 /////////////////////////////////////////////////////////////////////////////////////////
 
 //DISPLAYS an LED pattern
-int showLEDs(out port p, chanend fromVisualiser) {
+int showLEDs(out port p, chanend contChan) {
   int pattern; //1st bit...separate green LED
                //2nd bit...blue LED
                //3rd bit...green LED
                //4th bit...red LED
   while (1) {
-    fromVisualiser :> pattern;   //receive new pattern from visualiser
+    contChan :> pattern;   //receive new pattern from controller
     p <: pattern;                //send pattern to LED port
   }
   return 0;
 }
 
 //READ BUTTONS and send button pattern to userAnt
-void buttonListener(in port b, chanend toUserAnt) {
+void buttonListener(in port b, chanend outChan) {
   int r;
   while (1) {
     b when pinseq(15)  :> r;    // check that no button is pressed
     b when pinsneq(15) :> r;    // check if some buttons are pressed
-    if ((r==13) || (r==14))     // if either button is pressed
-    toUserAnt <: r;             // send button pattern to userAnt
+    if ((r==13) || (r==14)) {    // if either button is pressed
+        outChan <: r;             // send button pattern to outChan
+    }
   }
 }
 
@@ -130,7 +151,7 @@ int getItem(int inArray[IMWD * IMHT], int x, int y) {
         y -= IMHT;
     }
 
-    return inArray[x * IMWD + y];
+    return inArray[y * IMWD + x];
 }
 
 void setItem(int inArray[IMWD * IMHT], int x, int y, int value) {
@@ -147,7 +168,7 @@ void setItem(int inArray[IMWD * IMHT], int x, int y, int value) {
         y -= IMHT;
     }
 
-    inArray[x * IMWD + y] = value;
+    inArray[y * IMWD + x] = value;
 }
 
 int makeDecision(int arr[IMWD * IMHT], int startX, int startY) {
@@ -206,6 +227,7 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend fromButto
 
   //wait for SW1 to be pressed
   int buttonData = 0;
+
   while (buttonData != SW1_CODE) {
       fromButton :> buttonData;
   }
@@ -221,6 +243,8 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend fromButto
     for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
       c_in :> val;
       setItem(inArray, x, y, decode(val)); //reads in intermediate
+
+      toLEDs <: ((x+y) % 2) ? C_GREEN : C_GREEN_S;
     }
   }
 
@@ -349,18 +373,18 @@ int main(void) {
 
   i2c_master_if i2c[1];               //interface to accelerometer
 
-  char infname[] = "test.pgm";     //put your input image path here
-  char outfname[] = "testout.pgm"; //put your output image path here
+//  char infname[] = "test.pgm";     //put your input image path here
+//  char outfname[] = "testout.pgm"; //put your output image path here
   chan c_inIO, c_outIO, c_control, c_buttons, c_LEDs;    //extend your channel definitions here
 
   par {
-    buttonListener(buttons, c_buttons);
-    showLEDs(leds,c_LEDs);
-    i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing accelerometer data
-    accelerometer(i2c[0],c_control);        //client thread reading accelerometer data
-    DataInStream(infname, c_inIO);          //thread to read in a PGM image
-    DataOutStream(outfname, c_outIO);       //thread to write out a PGM image
-    distributor(c_inIO, c_outIO, c_control, c_buttons, c_LEDs);//thread to coordinate work on image
+      on tile[0]: buttonListener(buttons, c_buttons);
+      on tile[0]: showLEDs(leds,c_LEDs);
+      on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing accelerometer data
+      on tile[1]: accelerometer(i2c[0],c_control);        //client thread reading accelerometer data
+      on tile[1]: DataInStream("test.pgm", c_inIO);          //thread to read in a PGM image
+      on tile[1]: DataOutStream("testout.pgm", c_outIO);       //thread to write out a PGM image
+      on tile[1]: distributor(c_inIO, c_outIO, c_control, c_buttons, c_LEDs);//thread to coordinate work on image
   }
 
   return 0;
