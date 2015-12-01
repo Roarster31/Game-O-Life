@@ -25,14 +25,48 @@ port p_sda = XS1_PORT_1F;
 #define FXOS8700EQ_OUT_Y_LSB 0x4
 #define FXOS8700EQ_OUT_Z_MSB 0x5
 #define FXOS8700EQ_OUT_Z_LSB 0x6
+#define SW1_CODE 0xE
+#define SW2_CODE 0xD
+
+on tile[0] : in port buttons = XS1_PORT_4E; //port to access xCore-200 buttons
+on tile[0] : out port leds = XS1_PORT_4F;   //port to access xCore-200 LEDs
+
+/////////////////////////////////////////////////////////////////////////////////////////
+//
+//  Helper Functions provided for you
+//
+/////////////////////////////////////////////////////////////////////////////////////////
+
+//DISPLAYS an LED pattern
+int showLEDs(out port p, chanend fromVisualiser) {
+  int pattern; //1st bit...separate green LED
+               //2nd bit...blue LED
+               //3rd bit...green LED
+               //4th bit...red LED
+  while (1) {
+    fromVisualiser :> pattern;   //receive new pattern from visualiser
+    p <: pattern;                //send pattern to LED port
+  }
+  return 0;
+}
+
+//READ BUTTONS and send button pattern to userAnt
+void buttonListener(in port b, chanend toUserAnt) {
+  int r;
+  while (1) {
+    b when pinseq(15)  :> r;    // check that no button is pressed
+    b when pinsneq(15) :> r;    // check if some buttons are pressed
+    if ((r==13) || (r==14))     // if either button is pressed
+    toUserAnt <: r;             // send button pattern to userAnt
+  }
+}
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
 // Read Image from PGM file from path infname[] to channel c_out
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void DataInStream(char infname[], chanend c_out)
-{
+void DataInStream(char infname[], chanend c_out) {
   int res;
   uchar line[ IMWD ];
   printf( "DataInStream: Start...\n" );
@@ -163,14 +197,18 @@ int makeDecision(int arr[IMWD * IMHT], int startX, int startY) {
 // Currently the function just inverts the image
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void distributor(chanend c_in, chanend c_out, chanend fromAcc)
-{
+void distributor(chanend c_in, chanend c_out, chanend fromAcc, chanend fromButton, chanend toLEDs) {
   uchar val;
 
   //Starting up and wait for tilting of the xCore-200 Explorer
   printf( "ProcessImage:Start, size = %dx%d\n", IMHT, IMWD );
   printf( "Waiting for Board Tilt...\n" );
-//  fromAcc :> int value; we don't want to wait for the accelerometer, rather SW1
+
+  //wait for SW1 to be pressed
+  int buttonData = 0;
+  while (buttonData != SW1_CODE) {
+      fromButton :> buttonData;
+  }
 
   int inArray[IMWD * IMHT];
   int outArray[IMWD * IMHT];
@@ -233,8 +271,7 @@ void distributor(chanend c_in, chanend c_out, chanend fromAcc)
 // Write pixel stream from channel c_in to PGM image file
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-void DataOutStream(char outfname[], chanend c_in)
-{
+void DataOutStream(char outfname[], chanend c_in) {
   int res;
   uchar line[ IMWD ];
 
@@ -314,14 +351,16 @@ int main(void) {
 
   char infname[] = "test.pgm";     //put your input image path here
   char outfname[] = "testout.pgm"; //put your output image path here
-  chan c_inIO, c_outIO, c_control;    //extend your channel definitions here
+  chan c_inIO, c_outIO, c_control, c_buttons, c_LEDs;    //extend your channel definitions here
 
   par {
+    buttonListener(buttons, c_buttons);
+    showLEDs(leds,c_LEDs);
     i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing accelerometer data
     accelerometer(i2c[0],c_control);        //client thread reading accelerometer data
     DataInStream(infname, c_inIO);          //thread to read in a PGM image
     DataOutStream(outfname, c_outIO);       //thread to write out a PGM image
-    distributor(c_inIO, c_outIO, c_control);//thread to coordinate work on image
+    distributor(c_inIO, c_outIO, c_control, c_buttons, c_LEDs);//thread to coordinate work on image
   }
 
   return 0;
