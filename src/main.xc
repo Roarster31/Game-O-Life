@@ -71,11 +71,14 @@ int showLEDs(out port p, server LEDInterface l_interface[n], unsigned n) {
                //2nd bit...blue LED
                //3rd bit...green LED
                //4th bit...red LED
+
+  int separateEnabled = 0;
+  int currentRed = 0;
+  int currentGreen = 0;
+  int currentBlue = 0;
+
   while (1) {
-      int separateEnabled = 0;
-      int currentRed = 0;
-      int currentGreen = 0;
-      int currentBlue = 0;
+
       select{
           case l_interface[int j].setSeparate(int enabled):
                   separateEnabled = enabled;
@@ -274,7 +277,7 @@ typedef interface ExportInterface {
     int isPaused();
 } ExportInterface;
 
-unsafe void exportServer(chanend c_out, chanend fromButton, client ButtonInterface buttonInterface, server ExportInterface exportInterface, client LEDInterface l_interface,  chanend fromAcc) {
+unsafe void exportServer(chanend c_out, chanend fromButton, client ButtonInterface buttonInterface, server ExportInterface exportInterface, client LEDInterface l_interface,  chanend fromAcc, chanend continueChannel) {
   int currentState = 0;
   int * unsafe currentDataPointer;
   int paused = 0;
@@ -312,14 +315,16 @@ unsafe void exportServer(chanend c_out, chanend fromButton, client ButtonInterfa
                   printf("ending export process\n");
                   currentState = 0;
 
+                  l_interface.setColour(0,0,0);
+
 
               }
               buttonInterface.showInterest();
               break;
           case fromAcc :> paused:
               printf("tilted = %d\n", paused);
-
-
+              break;
+          case !paused => continueChannel :> int data:
               break;
       }
   }
@@ -349,17 +354,17 @@ unsafe void workerThing(chanend distribChannel) {
     }
 }
 
-unsafe void distributorServer(int * unsafe inArrayPointer, int * unsafe outArrayPointer, chanend workerChannels[n], unsigned n, client ExportInterface exportInterface, client LEDInterface l_interface) {
+unsafe void distributorServer(int * unsafe inArrayPointer, int * unsafe outArrayPointer, chanend workerChannels[n], unsigned n, client ExportInterface exportInterface, client LEDInterface l_interface, chanend continueChannel) {
 
-  int i = 0;
+  int roundNumber = 0;
   while (1) {
-      i++;
+      roundNumber++;
 
       //update the export interface's current data pointer incase it wants to export what we have so far
       exportInterface.setCurrentArraypointer(inArrayPointer);
 
       //alternate LED
-      l_interface.setSeparate(i % 2);
+      l_interface.setSeparate(roundNumber % 2);
 
       //dish out the jobs
       int i=0;
@@ -389,9 +394,11 @@ unsafe void distributorServer(int * unsafe inArrayPointer, int * unsafe outArray
               case workerChannels[int j] :> int data:
               completed++;
 
-              while(exportInterface.isPaused()) {
-                  printf("paused\n");
-              }
+              continueChannel <: 0;
+
+//              while(exportInterface.isPaused()) {
+//                  printf("paused\n");
+//              }
 
               if(i < IMHT) {
 
@@ -416,15 +423,15 @@ unsafe void distributorServer(int * unsafe inArrayPointer, int * unsafe outArray
 
 
       //report back the round and image
-      printf("\n\n------------ round %d ------------\n\n", i);
-
-      for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-           for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-             int gotItem = getItem(outArrayPointer, x, y);
-             printf("%d",gotItem);
-           }
-           printf("\n");
-      }
+//      printf("\n\n------------ round %d ------------\n\n", roundNumber);
+//
+//      for( int y = 0; y < IMHT; y++ ) {   //go through all lines
+//           for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
+//             int gotItem = getItem(outArrayPointer, x, y);
+//             printf("%d",gotItem);
+//           }
+//           printf("\n");
+//      }
 
 
       //wait before switching arrays if we're currently exporting from one
@@ -452,7 +459,7 @@ unsafe void distributorServer(int * unsafe inArrayPointer, int * unsafe outArray
 // Currently the function just inverts the image
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-unsafe void distributor(chanend c_in, chanend fromButton, client ButtonInterface buttonInterface, client LEDInterface l_interface, client ExportInterface exportInterface) {
+unsafe void distributor(chanend c_in, chanend fromButton, client ButtonInterface buttonInterface, client LEDInterface l_interface, client ExportInterface exportInterface, chanend continueChannel) {
   uchar val;
 
   //Starting up and wait for tilting of the xCore-200 Explorer
@@ -483,13 +490,15 @@ unsafe void distributor(chanend c_in, chanend fromButton, client ButtonInterface
     }
   }
 
+  l_interface.setColour(0,0,0);
+
   int * unsafe inArrayPointer = inArray;
   int * unsafe outArrayPointer = outArray;
 
   chan workerChannels[WORKER_THREADS];
 
   par {
-            distributorServer(inArrayPointer, outArrayPointer, workerChannels, WORKER_THREADS, exportInterface, l_interface);
+            distributorServer(inArrayPointer, outArrayPointer, workerChannels, WORKER_THREADS, exportInterface, l_interface, continueChannel);
             {
                 par (int i=0; i<WORKER_THREADS; i++) {
                     workerThing(workerChannels[i]);
@@ -598,7 +607,7 @@ unsafe int main(void) {
 
 //  char infname[] = "test.pgm";     //put your input image path here
 //  char outfname[] = "testout.pgm"; //put your output image path here
-  chan c_inIO, c_outIO, c_control;    //extend your channel definitions here
+  chan c_inIO, c_outIO, c_control, continueChannel;    //extend your channel definitions here
 
   chan c_buttons[2];
 
@@ -612,8 +621,8 @@ unsafe int main(void) {
       on tile[0]: accelerometer(i2c[0],c_control);        //client thread reading accelerometer data
       on tile[0]: DataInStream("test.pgm", c_inIO);          //thread to read in a PGM image
       on tile[0]: DataOutStream("testout.pgm", c_outIO);       //thread to write out a PGM image
-      on tile[0]: exportServer(c_outIO, c_buttons[0], b_interface[0], exportInterface, l_interface[0], c_control);
-      on tile[1]: distributor(c_inIO, c_buttons[1], b_interface[1], l_interface[1], exportInterface);//thread to coordinate work on image
+      on tile[0]: exportServer(c_outIO, c_buttons[0], b_interface[0], exportInterface, l_interface[0], c_control, continueChannel);
+      on tile[1]: distributor(c_inIO, c_buttons[1], b_interface[1], l_interface[1], exportInterface, continueChannel);//thread to coordinate work on image
   }
 
   return 0;
