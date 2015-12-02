@@ -60,7 +60,7 @@ on tile[0] : out port leds = XS1_PORT_4F;   //port to access xCore-200 LEDs
 
 typedef interface LEDInterface {
   void setSeparate(int enabled);
-  void setMain(int currentRed, int currentGreen, int currentBlue);
+  void setColour(int currentRed, int currentGreen, int currentBlue);
 } LEDInterface;
 
 //DISPLAYS an LED pattern
@@ -76,13 +76,17 @@ int showLEDs(out port p, server LEDInterface l_interface[n], unsigned n) {
       int currentBlue = 0;
       select{
           case l_interface[int j].setSeparate(int enabled):
+                  separateEnabled = enabled;
               break;
-          case l_interface[int j].setMain(int currentRed, int currentGreen, int currentBlue):
+          case l_interface[int j].setColour(int red, int green, int blue):
+                  currentRed = red;
+                  currentGreen = green;
+                  currentBlue = blue;
               break;
       }
 
 
-    pattern = (separateEnabled * 8) | (currentRed * 4) | (currentGreen * 2) | currentBlue;
+    pattern = (separateEnabled ) | (currentBlue * 2) | (currentGreen * 4) | (currentRed * 8);
     p <: pattern;                //send pattern to LED port
   }
   return 0;
@@ -274,6 +278,9 @@ unsafe void exportServer(chanend c_out, chanend fromButton, client ButtonInterfa
               if(buttonType == SW2_CODE) {
                   printf("Received export request\n");
 
+                  //with UX in mind we'll light up the LED now
+                  l_interface.setColour(0, 0, 1);
+
                   currentState = 1;
                   printf("starting export process\n");
                   c_out <: '0';
@@ -281,16 +288,13 @@ unsafe void exportServer(chanend c_out, chanend fromButton, client ButtonInterfa
                        for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
                            int pointerValue = currentDataPointer[x * IMWD + y];
                            uchar value = encode(pointerValue); // outputs inverted value
-//                           printf("%d",value);
                            c_out <: value;
                        }
-//                       printf("\n");
                   }
                   printf("ending export process\n");
                   currentState = 0;
 
-                  //with UX in mind we'll light up the LED now
-                  l_interface.setMain(0, 0, 1);
+
               }
               buttonInterface.showInterest();
               break;
@@ -319,7 +323,7 @@ unsafe void distributor(chanend c_in, chanend fromAcc, chanend fromButton, clien
       fromButton :> buttonData;
   }
 
-  l_interface.setMain(0,1,0);
+  l_interface.setColour(0,1,0);
 
   int inArray[IMWD * IMHT];
   int outArray[IMWD * IMHT];
@@ -338,57 +342,48 @@ unsafe void distributor(chanend c_in, chanend fromAcc, chanend fromButton, clien
   int * unsafe inArrayPointer = inArray;
   int * unsafe outArrayPointer = outArray;
 
+  int i = 0;
+  while (1) {
+      i++;
 
+      exportInterface.setCurrentArraypointer(inArrayPointer);
 
-          int i = 0;
-          while (1) {
-              i++;
+      l_interface.setSeparate(i % 2);
 
-              exportInterface.setCurrentArraypointer(inArrayPointer);
-
-              l_interface.setSeparate(i % 2);
-
-          //we do all our processing
-          for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-              for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-                  setItem(outArrayPointer, x, y, makeDecision(inArrayPointer, x, y));
-              }
-            }
-
-
-
-
-          printf("\n\n------------ round %d ------------\n\n", i);
-
-          for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-               for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-                 int gotItem = getItem(outArrayPointer, x, y);
-                 printf("%d",gotItem);
-               }
-               printf("\n");
-             }
-
-          printf("done printing round\n");
-          while(exportInterface.isExporting()) {
-                        //export
-              printf("waiting\n");
+      //we do all our processing
+      for( int y = 0; y < IMHT; y++ ) {   //go through all lines
+          for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
+              setItem(outArrayPointer, x, y, makeDecision(inArrayPointer, x, y));
           }
-
-          printf("beginning pointer swap\n");
-          int * unsafe swap = inArrayPointer;
-          inArrayPointer = outArrayPointer;
-          outArrayPointer = swap;
-
-
-          }
+      }
 
 
 
 
+      printf("\n\n------------ round %d ------------\n\n", i);
+
+      for( int y = 0; y < IMHT; y++ ) {   //go through all lines
+           for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
+             int gotItem = getItem(outArrayPointer, x, y);
+             printf("%d",gotItem);
+           }
+           printf("\n");
+      }
 
 
+      while(exportInterface.isExporting()) {
+                    //export
+          printf("waiting\n");
+      }
 
-  printf( "\nOne processing round completed...\n" );
+
+      int * unsafe swap = inArrayPointer;
+      inArrayPointer = outArrayPointer;
+      outArrayPointer = swap;
+
+
+  }
+
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
