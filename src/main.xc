@@ -50,6 +50,8 @@ on tile[0]: port p_sda = XS1_PORT_1F;
 #define C_WHITE 0xE
 #define C_WHITE_S 0xF
 
+#define TIMER_LIMIT 0x7FFFFFFF
+
 on tile[0] : in port buttons = XS1_PORT_4E; //port to access xCore-200 buttons
 on tile[0] : out port leds = XS1_PORT_4F;   //port to access xCore-200 LEDs
 
@@ -262,24 +264,37 @@ unsafe int makeDecision(int * unsafe arr, int startX, int startY) {
 }
 
 
-unsafe void worker(int * unsafe inArr, int * unsafe outArr, int startX, int startY, int endX, int endY) {
+unsafe int worker(int * unsafe inArr, int * unsafe outArr, int startX, int startY, int endX, int endY) {
+    int liveCells = 0;
     for(int x = startX; x <= endX; x++){
         for(int y = startY; y <= endY; y++){
-            setItem(outArr, x , y, makeDecision(inArr, x, y));
+            int alive = makeDecision(inArr, x, y);
+            liveCells += alive;
+            setItem(outArr, x , y, alive);
         }
     }
+    return liveCells;
 }
 
 
 typedef interface ControlInterface {
-    void setCurrentArraypointer(int * unsafe currentDataPointer);
+    void updateStatus(int * unsafe currentDataPointer, int currentRound, int liveCells);
     int isPaused();
 } ControlInterface;
 
 unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterface buttonInterface, server ControlInterface controlInterface, client LEDInterface l_interface,  chanend fromAcc, chanend continueChannel) {
   int exporting = 0;
-  int * unsafe currentDataPointer;
   int paused = 0;
+
+  int * unsafe currentDataPointer;
+  int currentRound;
+  int currentLiveCells;
+
+  timer time;
+  unsigned int startTime;
+  unsigned int pauseStartTime;
+  unsigned int totalLostTime = 0;
+  time :> startTime;
 
   while(1) {
       buttonInterface.showInterest();
@@ -287,9 +302,11 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
           case controlInterface.isPaused() -> int returnVal:
               returnVal = paused;
               break;
-          case controlInterface.setCurrentArraypointer(int * unsafe dataPointer):
-                currentDataPointer = dataPointer;
-                  break;
+          case controlInterface.updateStatus(int * unsafe dataPointer, int round, int liveCells):
+              currentDataPointer = dataPointer;
+              currentRound = round;
+              currentLiveCells = liveCells;
+              break;
           case fromButton :> int buttonType:
               if(buttonType == SW2_CODE && !exporting) {
                   printf("Received export request\n");
@@ -317,7 +334,24 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
               buttonInterface.showInterest();
               break;
           case fromAcc :> paused:
-              printf("tilted = %d\n", paused);
+              if (paused) {
+                  time :> pauseStartTime;
+                  unsigned int elapsedTime = pauseStartTime - startTime - totalLostTime;
+                  printf("----Paused----\n");
+                  printf("Current round: %d ", currentRound);
+                  printf("Current live cells: %d ", currentLiveCells);
+                  printf("Current processing time: %d\n", elapsedTime/(100 * 100 * 100 * 100));
+                  l_interface.setColour(1, 0, 0);
+
+
+              } else {
+                  printf("resuming...\n");
+                  l_interface.setColour(0, 0, 0);
+
+                  unsigned int endTime;
+                  time :> endTime;
+                  totalLostTime += endTime - pauseStartTime;
+              }
               break;
           case !paused && !exporting => continueChannel :> int data:
               break;
@@ -343,20 +377,22 @@ unsafe void workerThing(chanend distribChannel) {
         distribChannel :> endY;
 
 
-        worker(inArrayPointer, outArrayPointer, startX, startY, endX, endY);
+        int liveCells = worker(inArrayPointer, outArrayPointer, startX, startY, endX, endY);
 
-        distribChannel <: 0;
+        distribChannel <: liveCells;
     }
 }
 
 unsafe void distributorServer(int * unsafe inArrayPointer, int * unsafe outArrayPointer, chanend workerChannels[n], unsigned n, client ControlInterface controlInterface, client LEDInterface l_interface, chanend continueChannel) {
 
+  controlInterface.updateStatus(inArrayPointer, 0, 0);
+
   int roundNumber = 0;
+
   while (1) {
       roundNumber++;
 
-      //update the control interface's current data pointer incase it wants to export what we have so far
-      controlInterface.setCurrentArraypointer(inArrayPointer);
+
 
       //alternate LED
       l_interface.setSeparate(roundNumber % 2);
@@ -381,13 +417,17 @@ unsafe void distributorServer(int * unsafe inArrayPointer, int * unsafe outArray
           workerChannels[i] <: endY;
       }
 
+      int totalLiveCells = 0;
+
 
       //wait for jobs to complete and dish out more if necessary
       while(completed < IMHT) {
 
           select {
-              case workerChannels[int j] :> int data:
+              case workerChannels[int j] :> int liveCells:
+              totalLiveCells += liveCells;
               completed++;
+
 
               continueChannel <: 0;
 
@@ -430,7 +470,10 @@ unsafe void distributorServer(int * unsafe inArrayPointer, int * unsafe outArray
 
 
       //wait before switching arrays if we're currently exporting from one
+
+
       continueChannel <: 0;
+
 //      while(controlInterface.isExporting()) {
 //                    //export
 //          printf("waiting\n");
@@ -441,6 +484,8 @@ unsafe void distributorServer(int * unsafe inArrayPointer, int * unsafe outArray
       inArrayPointer = outArrayPointer;
       outArrayPointer = swap;
 
+      //update the control interface's current data pointer incase it wants to export what we have so far
+      controlInterface.updateStatus(inArrayPointer, roundNumber, totalLiveCells);
 
   }
 
