@@ -271,15 +271,20 @@ unsafe void worker(int * unsafe inArr, int * unsafe outArr, int startX, int star
 typedef interface ExportInterface {
     int isExporting();
     void setCurrentArraypointer(int * unsafe currentDataPointer);
+    int isPaused();
 } ExportInterface;
 
 unsafe void exportServer(chanend c_out, chanend fromButton, client ButtonInterface buttonInterface, server ExportInterface exportInterface, client LEDInterface l_interface,  chanend fromAcc) {
   int currentState = 0;
   int * unsafe currentDataPointer;
   int paused = 0;
+
   while(1) {
       buttonInterface.showInterest();
       select {
+          case exportInterface.isPaused() -> int returnVal:
+              returnVal = paused;
+              break;
           case exportInterface.isExporting() -> int returnVal:
 
               returnVal = currentState;
@@ -376,12 +381,17 @@ unsafe void distributorServer(int * unsafe inArrayPointer, int * unsafe outArray
           workerChannels[i] <: endY;
       }
 
+
       //wait for jobs to complete and dish out more if necessary
       while(completed < IMHT) {
+
           select {
               case workerChannels[int j] :> int data:
               completed++;
 
+              while(exportInterface.isPaused()) {
+                  printf("paused\n");
+              }
 
               if(i < IMHT) {
 
