@@ -12,6 +12,8 @@
 #define  IMHT 16                  //image height
 #define  IMWD 16                  //image width
 
+#define  WORKER_THREADS 7
+
 typedef unsigned char uchar;      //using uchar as shorthand
 
 on tile[0]: port p_scl = XS1_PORT_1E;         //interface ports to accelerometer
@@ -216,6 +218,7 @@ unsafe void setItem(int * unsafe inArray, int x, int y, int value) {
     inArray[y * IMWD + x] = value;
 }
 
+
 unsafe int makeDecision(int * unsafe arr, int startX, int startY) {
 
     int liveNeighbours = 0;
@@ -256,19 +259,29 @@ unsafe int makeDecision(int * unsafe arr, int startX, int startY) {
 }
 
 
+unsafe void worker(int * unsafe inArr, int * unsafe outArr, int startX, int startY, int endX, int endY) {
+    for(int x = startX; x <= endX; x++){
+        for(int y = startY; y <= endY; y++){
+            setItem(outArr, x , y, makeDecision(inArr, x, y));
+        }
+    }
+}
+
+
 typedef interface ExportInterface {
     int isExporting();
     void setCurrentArraypointer(int * unsafe currentDataPointer);
 } ExportInterface;
 
-unsafe void exportServer(chanend c_out, chanend fromButton, client ButtonInterface buttonInterface, server ExportInterface exportInterface, client LEDInterface l_interface) {
+unsafe void exportServer(chanend c_out, chanend fromButton, client ButtonInterface buttonInterface, server ExportInterface exportInterface, client LEDInterface l_interface,  chanend fromAcc) {
   int currentState = 0;
   int * unsafe currentDataPointer;
+  int paused = 0;
   while(1) {
       buttonInterface.showInterest();
       select {
           case exportInterface.isExporting() -> int returnVal:
-              printf("exporting query received, sending %d\n",currentState);
+
               returnVal = currentState;
               break;
           case exportInterface.setCurrentArraypointer(int * unsafe dataPointer):
@@ -298,9 +311,130 @@ unsafe void exportServer(chanend c_out, chanend fromButton, client ButtonInterfa
               }
               buttonInterface.showInterest();
               break;
+          case fromAcc :> paused:
+              printf("tilted = %d\n", paused);
+
+
+              break;
       }
   }
 }
+
+unsafe void workerThing(chanend distribChannel) {
+    int * unsafe inArrayPointer;
+    int * unsafe outArrayPointer;
+    int startX = 0;
+    int startY = 0;
+    int endX = 0;
+    int endY = 0;
+
+    while(1) {
+        distribChannel :> inArrayPointer;
+        distribChannel :> outArrayPointer;
+
+        distribChannel :> startX;
+        distribChannel :> startY;
+        distribChannel :> endX;
+        distribChannel :> endY;
+
+
+        worker(inArrayPointer, outArrayPointer, startX, startY, endX, endY);
+
+        distribChannel <: 0;
+    }
+}
+
+unsafe void distributorServer(int * unsafe inArrayPointer, int * unsafe outArrayPointer, chanend workerChannels[n], unsigned n, client ExportInterface exportInterface, client LEDInterface l_interface) {
+
+  int i = 0;
+  while (1) {
+      i++;
+
+      //update the export interface's current data pointer incase it wants to export what we have so far
+      exportInterface.setCurrentArraypointer(inArrayPointer);
+
+      //alternate LED
+      l_interface.setSeparate(i % 2);
+
+      //dish out the jobs
+      int i=0;
+      int completed = 0;
+      for(i; i<n; i++) {
+
+          int startX = 0;
+          int startY = i;
+          int endX = IMWD;
+          int endY = i;
+
+          //the data each worker needs to do its job
+          workerChannels[i] <: inArrayPointer;
+          workerChannels[i] <: outArrayPointer;
+
+          workerChannels[i] <: startX;
+          workerChannels[i] <: startY;
+          workerChannels[i] <: endX;
+          workerChannels[i] <: endY;
+      }
+
+      //wait for jobs to complete and dish out more if necessary
+      while(completed < IMHT) {
+          select {
+              case workerChannels[int j] :> int data:
+              completed++;
+
+
+              if(i < IMHT) {
+
+                  int startX = 0;
+                  int startY = i;
+                  int endX = IMWD;
+                  int endY = i;
+
+                  //the data each worker needs to do its job
+                  workerChannels[j] <: inArrayPointer;
+                  workerChannels[j] <: outArrayPointer;
+
+                  workerChannels[j] <: startX;
+                  workerChannels[j] <: startY;
+                  workerChannels[j] <: endX;
+                  workerChannels[j] <: endY;
+                  i++;
+              }
+              break;
+          }
+      }
+
+
+      //report back the round and image
+      printf("\n\n------------ round %d ------------\n\n", i);
+
+      for( int y = 0; y < IMHT; y++ ) {   //go through all lines
+           for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
+             int gotItem = getItem(outArrayPointer, x, y);
+             printf("%d",gotItem);
+           }
+           printf("\n");
+      }
+
+
+      //wait before switching arrays if we're currently exporting from one
+      while(exportInterface.isExporting()) {
+                    //export
+          printf("waiting\n");
+      }
+
+
+      int * unsafe swap = inArrayPointer;
+      inArrayPointer = outArrayPointer;
+      outArrayPointer = swap;
+
+
+  }
+
+
+    //all done
+}
+
 /////////////////////////////////////////////////////////////////////////////////////////
 //
 // Start your implementation by changing this function to implement the game of life
@@ -308,7 +442,7 @@ unsafe void exportServer(chanend c_out, chanend fromButton, client ButtonInterfa
 // Currently the function just inverts the image
 //
 /////////////////////////////////////////////////////////////////////////////////////////
-unsafe void distributor(chanend c_in, chanend fromAcc, chanend fromButton, client ButtonInterface buttonInterface, client LEDInterface l_interface, client ExportInterface exportInterface) {
+unsafe void distributor(chanend c_in, chanend fromButton, client ButtonInterface buttonInterface, client LEDInterface l_interface, client ExportInterface exportInterface) {
   uchar val;
 
   //Starting up and wait for tilting of the xCore-200 Explorer
@@ -342,47 +476,18 @@ unsafe void distributor(chanend c_in, chanend fromAcc, chanend fromButton, clien
   int * unsafe inArrayPointer = inArray;
   int * unsafe outArrayPointer = outArray;
 
-  int i = 0;
-  while (1) {
-      i++;
+  chan workerChannels[WORKER_THREADS];
 
-      exportInterface.setCurrentArraypointer(inArrayPointer);
-
-      l_interface.setSeparate(i % 2);
-
-      //we do all our processing
-      for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-          for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-              setItem(outArrayPointer, x, y, makeDecision(inArrayPointer, x, y));
-          }
-      }
+  par {
+            distributorServer(inArrayPointer, outArrayPointer, workerChannels, WORKER_THREADS, exportInterface, l_interface);
+            {
+                par (int i=0; i<WORKER_THREADS; i++) {
+                    workerThing(workerChannels[i]);
+                }
+            }
+        }
 
 
-
-
-      printf("\n\n------------ round %d ------------\n\n", i);
-
-      for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-           for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-             int gotItem = getItem(outArrayPointer, x, y);
-             printf("%d",gotItem);
-           }
-           printf("\n");
-      }
-
-
-      while(exportInterface.isExporting()) {
-                    //export
-          printf("waiting\n");
-      }
-
-
-      int * unsafe swap = inArrayPointer;
-      inArrayPointer = outArrayPointer;
-      outArrayPointer = swap;
-
-
-  }
 
 }
 
@@ -463,6 +568,11 @@ void accelerometer(client interface i2c_master_if i2c, chanend toDist) {
         tilted = 1 - tilted;
         toDist <: 1;
       }
+    }else{
+      if (x<20) {
+        tilted = 1 - tilted;
+        toDist <: 0;
+      }
     }
   }
 }
@@ -489,11 +599,11 @@ unsafe int main(void) {
       on tile[0]: buttonListener(buttons, c_buttons, 2, b_interface, 2);
       on tile[0]: showLEDs(leds, l_interface, 2);
       on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing accelerometer data
-      on tile[1]: accelerometer(i2c[0],c_control);        //client thread reading accelerometer data
-      on tile[1]: DataInStream("test.pgm", c_inIO);          //thread to read in a PGM image
-      on tile[1]: DataOutStream("testout.pgm", c_outIO);       //thread to write out a PGM image
-      on tile[1]: exportServer(c_outIO, c_buttons[0], b_interface[0], exportInterface, l_interface[0]);
-      on tile[1]: distributor(c_inIO, c_control, c_buttons[1], b_interface[1], l_interface[1], exportInterface);//thread to coordinate work on image
+      on tile[0]: accelerometer(i2c[0],c_control);        //client thread reading accelerometer data
+      on tile[0]: DataInStream("test.pgm", c_inIO);          //thread to read in a PGM image
+      on tile[0]: DataOutStream("testout.pgm", c_outIO);       //thread to write out a PGM image
+      on tile[0]: exportServer(c_outIO, c_buttons[0], b_interface[0], exportInterface, l_interface[0], c_control);
+      on tile[1]: distributor(c_inIO, c_buttons[1], b_interface[1], l_interface[1], exportInterface);//thread to coordinate work on image
   }
 
   return 0;
