@@ -9,8 +9,8 @@
 #include <print.h>
 #include <stdlib.h>
 
-#define  IMHT 16                  //image height
-#define  IMWD 16                  //image width
+#define  IMHT 64                  //image height
+#define  IMWD 64                  //image width
 
 #define  WORKER_THREADS 7
 
@@ -154,7 +154,7 @@ void DataInStream(char infname[], chanend c_out) {
     _readinline( line, IMWD );
     for( int x = 0; x < IMWD; x++ ) {
       c_out <: line[ x ];
-      printf( "-%4.1d ", line[ x ] ); //show image values
+//      printf( "-%4.1d ", line[ x ] ); //show image values
     }
     printf( "\n" );
   }
@@ -660,7 +660,7 @@ unsafe int main(void) {
       on tile[0]: showLEDs(leds, l_interface, 2);
       on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing accelerometer data
       on tile[0]: accelerometer(i2c[0],c_control);        //client thread reading accelerometer data
-      on tile[0]: DataInStream("test.pgm", c_inIO);          //thread to read in a PGM image
+      on tile[0]: DataInStream("64x64.pgm", c_inIO);          //thread to read in a PGM image
       on tile[0]: DataOutStream("testout.pgm", c_outIO);       //thread to write out a PGM image
       on tile[0]: controlServer(c_outIO, c_buttons[0], b_interface[0], controlInterface, l_interface[0], c_control, continueChannel);
       on tile[1]: distributor(c_inIO, c_buttons[1], b_interface[1], l_interface[1], controlInterface, continueChannel);//thread to coordinate work on image
