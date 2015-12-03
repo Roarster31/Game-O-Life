@@ -9,8 +9,8 @@
 #include <print.h>
 #include <stdlib.h>
 
-#define  IMHT 64                  //image height
-#define  IMWD 64                  //image width
+#define  IMHT 1024                  //image height
+#define  IMWD 1024                  //image width
 
 #define  WORKER_THREADS 7
 
@@ -187,7 +187,7 @@ uchar encode(int intermediary) {
     return output;
 }
 
-unsafe int getItem(int * unsafe inArray, int x, int y) {
+unsafe int getItem(uchar * unsafe inArray, int x, int y) {
     while (x < 0) {
         x += IMWD;
     }
@@ -201,12 +201,14 @@ unsafe int getItem(int * unsafe inArray, int x, int y) {
         y -= IMHT;
     }
 
+    int elementIndex = y * IMWD + x;
+    int ucharIndex = (elementIndex / 8) + 1;
+    int indexInUchar = elementIndex % 8;
 
-
-    return inArray[y * IMWD + x];
+    return (inArray[ucharIndex] >> indexInUchar) & 1;
 }
 
-unsafe void setItem(int * unsafe inArray, int x, int y, int value) {
+unsafe void setItem(uchar * unsafe inArray, int x, int y, int value) {
     while (x < 0) {
         x += IMWD;
     }
@@ -220,11 +222,15 @@ unsafe void setItem(int * unsafe inArray, int x, int y, int value) {
         y -= IMHT;
     }
 
-    inArray[y * IMWD + x] = value;
+    int elementIndex = y * IMWD + x;
+    int ucharIndex = (elementIndex / 8) + 1;
+    int indexInUchar = elementIndex % 8;
+
+    inArray[ucharIndex] ^= (-value ^ inArray[ucharIndex]) & (1 << indexInUchar);
 }
 
 
-unsafe int makeDecision(int * unsafe arr, int startX, int startY) {
+unsafe int makeDecision(uchar * unsafe arr, int startX, int startY) {
 
     int liveNeighbours = 0;
     for( int y = startY - 1; y <= startY + 1; y++ ) {   //go through all lines
@@ -264,7 +270,7 @@ unsafe int makeDecision(int * unsafe arr, int startX, int startY) {
 }
 
 
-unsafe int worker(int * unsafe inArr, int * unsafe outArr, int startX, int startY, int endX, int endY) {
+unsafe int worker(uchar * unsafe inArr, uchar * unsafe outArr, int startX, int startY, int endX, int endY) {
     int liveCells = 0;
     for(int x = startX; x <= endX; x++){
         for(int y = startY; y <= endY; y++){
@@ -278,7 +284,7 @@ unsafe int worker(int * unsafe inArr, int * unsafe outArr, int startX, int start
 
 
 typedef interface ControlInterface {
-    void updateStatus(int * unsafe currentDataPointer, int currentRound, int liveCells);
+    void updateStatus(uchar * unsafe currentDataPointer, int currentRound, int liveCells);
     int isPaused();
 } ControlInterface;
 
@@ -286,7 +292,7 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
   int exporting = 0;
   int paused = 0;
 
-  int * unsafe currentDataPointer;
+  uchar * unsafe currentDataPointer;
   int currentRound;
   int currentLiveCells;
 
@@ -302,7 +308,7 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
           case controlInterface.isPaused() -> int returnVal:
               returnVal = paused;
               break;
-          case controlInterface.updateStatus(int * unsafe dataPointer, int round, int liveCells):
+          case controlInterface.updateStatus(uchar * unsafe dataPointer, int round, int liveCells):
               currentDataPointer = dataPointer;
               currentRound = round;
               currentLiveCells = liveCells;
@@ -360,8 +366,8 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
 }
 
 unsafe void workerThing(chanend distribChannel) {
-    int * unsafe inArrayPointer;
-    int * unsafe outArrayPointer;
+    uchar * unsafe inArrayPointer;
+    uchar * unsafe outArrayPointer;
     int startX = 0;
     int startY = 0;
     int endX = 0;
@@ -383,7 +389,7 @@ unsafe void workerThing(chanend distribChannel) {
     }
 }
 
-unsafe void distributorServer(int * unsafe inArrayPointer, int * unsafe outArrayPointer, chanend workerChannels[n], unsigned n, client ControlInterface controlInterface, client LEDInterface l_interface, chanend continueChannel) {
+unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outArrayPointer, chanend workerChannels[n], unsigned n, client ControlInterface controlInterface, client LEDInterface l_interface, chanend continueChannel) {
 
   controlInterface.updateStatus(inArrayPointer, 0, 0);
 
@@ -480,7 +486,7 @@ unsafe void distributorServer(int * unsafe inArrayPointer, int * unsafe outArray
 //      }
 
 
-      int * unsafe swap = inArrayPointer;
+      uchar * unsafe swap = inArrayPointer;
       inArrayPointer = outArrayPointer;
       outArrayPointer = swap;
 
@@ -517,8 +523,9 @@ unsafe void distributor(chanend c_in, chanend fromButton, client ButtonInterface
 
   l_interface.setColour(0,1,0);
 
-  int inArray[IMWD * IMHT];
-  int outArray[IMWD * IMHT];
+
+  uchar inArray[(((IMWD * IMHT)/8)+1)];
+  uchar outArray[(((IMWD * IMHT)/8)+1)];
 
   //Read in and do something with your image values..
   //This just inverts every pixel, but you should
@@ -533,8 +540,8 @@ unsafe void distributor(chanend c_in, chanend fromButton, client ButtonInterface
 
   l_interface.setColour(0,0,0);
 
-  int * unsafe inArrayPointer = inArray;
-  int * unsafe outArrayPointer = outArray;
+  uchar * unsafe inArrayPointer = inArray;
+  uchar * unsafe outArrayPointer = outArray;
 
   chan workerChannels[WORKER_THREADS];
 
@@ -660,7 +667,7 @@ unsafe int main(void) {
       on tile[0]: showLEDs(leds, l_interface, 2);
       on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing accelerometer data
       on tile[0]: accelerometer(i2c[0],c_control);        //client thread reading accelerometer data
-      on tile[0]: DataInStream("64x64.pgm", c_inIO);          //thread to read in a PGM image
+      on tile[0]: DataInStream("256x256.pgm", c_inIO);          //thread to read in a PGM image
       on tile[0]: DataOutStream("testout.pgm", c_outIO);       //thread to write out a PGM image
       on tile[0]: controlServer(c_outIO, c_buttons[0], b_interface[0], controlInterface, l_interface[0], c_control, continueChannel);
       on tile[1]: distributor(c_inIO, c_buttons[1], b_interface[1], l_interface[1], controlInterface, continueChannel);//thread to coordinate work on image
