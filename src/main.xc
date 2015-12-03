@@ -32,24 +32,6 @@ on tile[0]: port p_sda = XS1_PORT_1F;
 #define SW1_CODE 0xE
 #define SW2_CODE 0xD
 
-//colour codes
-#define C_OFF 0x0
-#define C_OFF_S 0x1
-#define C_BLUE 0x2
-#define C_BLUE_S 0x3
-#define C_GREEN 0x4
-#define C_GREEN_S 0x5
-#define C_LGTBLUE 0x6
-#define C_LGTBLUE_S 0x7
-#define C_ORANGE 0x8
-#define C_ORANGE_S 0x9
-#define C_PURPLE 0xA
-#define C_PURPLE_S 0xB
-#define C_YELLOW 0xC
-#define C_YELLOW_S 0xD
-#define C_WHITE 0xE
-#define C_WHITE_S 0xF
-
 #define TIMER_LIMIT 0x7FFFFFFF
 
 on tile[0] : in port buttons = XS1_PORT_4E; //port to access xCore-200 buttons
