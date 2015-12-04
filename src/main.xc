@@ -252,19 +252,6 @@ unsafe int makeDecision(uchar * unsafe arr, int startX, int startY) {
 }
 
 
-unsafe int worker(uchar * unsafe inArr, uchar * unsafe outArr, int startX, int startY, int endX, int endY) {
-    int liveCells = 0;
-    for(int x = startX; x <= endX; x++){
-        for(int y = startY; y <= endY; y++){
-            int alive = makeDecision(inArr, x, y);
-            liveCells += alive;
-            setItem(outArr, x , y, alive);
-        }
-    }
-    return liveCells;
-}
-
-
 typedef interface ControlInterface {
     void updateStatus(uchar * unsafe currentDataPointer, int currentRound, int liveCells);
     int isPaused();
@@ -367,7 +354,14 @@ unsafe void workerThing(chanend distribChannel) {
         distribChannel :> endY;
 
 
-        int liveCells = worker(inArrayPointer, outArrayPointer, startX, startY, endX, endY);
+        int liveCells = 0;
+        for(int x = startX; x <= endX; x++){
+            for(int y = startY; y <= endY; y++){
+                int alive = makeDecision(inArrayPointer, x, y);
+                liveCells += alive;
+                setItem(outArrayPointer, x , y, alive);
+            }
+        }
 
         distribChannel <: liveCells;
     }
