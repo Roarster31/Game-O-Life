@@ -9,17 +9,35 @@ int _openinpgm(char fname[], int width, int height)
 {
 	char str[ 64 ];
     int inwidth, inheight;
-
+//
 	_INFP = fopen( fname, "rb" );
-	if( _INFP == NULL )
-	{
-		printf( "Could not open %s.\n", fname );
-		return -1;
-	}
-	//Strip off header
+//	if( _INFP == NULL )
+//	{
+//		printf( "Could not open %s.\n", fname );
+//		return -1;
+//	}
+//	//Strip off header
     fgets( str, 64, _INFP ); //Version: P5
     fgets( str, 64, _INFP ); //width and height
-    sscanf( str, "%d%d", &inwidth, &inheight );
+
+    char * pch;
+    pch = strtok (str," ");
+    int index = 0;
+    while (pch != NULL && index < 2)
+    {
+
+        switch(index) {
+        case 0:
+            inwidth = atoi(pch);
+            break;
+        case 1:
+            inheight = atoi(pch);
+            break;
+        }
+        pch = strtok (NULL, " ");
+        index++;
+    }
+
     if( inwidth != width || inheight != height )
     {
     	printf( "Input image size(%dx%d) does not = %dx%d or trouble reading header\n", inwidth, inheight, width, height );

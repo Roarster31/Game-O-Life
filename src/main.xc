@@ -9,8 +9,8 @@
 #include <print.h>
 #include <stdlib.h>
 
-#define  IMHT 1024                  //image height
-#define  IMWD 1024                  //image width
+#define  IMHT 16                  //image height
+#define  IMWD 16                  //image width
 
 #define  WORKER_THREADS 7
 
@@ -274,6 +274,8 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
   int exporting = 0;
   int paused = 0;
 
+
+
   uchar * unsafe currentDataPointer;
   int currentRound;
   int currentLiveCells;
@@ -509,9 +511,6 @@ unsafe void distributor(chanend c_in, chanend fromButton, client ButtonInterface
   uchar inArray[(((IMWD * IMHT)/8)+1)];
   uchar outArray[(((IMWD * IMHT)/8)+1)];
 
-  //Read in and do something with your image values..
-  //This just inverts every pixel, but you should
-  //change the image according to the "Game of Life"
   printf( "Processing...\n" );
   for( int y = 0; y < IMHT; y++ ) {   //go through all lines
     for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
@@ -519,6 +518,8 @@ unsafe void distributor(chanend c_in, chanend fromButton, client ButtonInterface
       setItem(inArray, x, y, decode(val)); //reads in intermediate
     }
   }
+
+
 
   l_interface.setColour(0,0,0);
 
@@ -649,7 +650,7 @@ unsafe int main(void) {
       on tile[0]: showLEDs(leds, l_interface, 2);
       on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing accelerometer data
       on tile[0]: accelerometer(i2c[0],c_control);        //client thread reading accelerometer data
-      on tile[0]: DataInStream("256x256.pgm", c_inIO);          //thread to read in a PGM image
+      on tile[0]: DataInStream("test.pgm", c_inIO);          //thread to read in a PGM image
       on tile[0]: DataOutStream("testout.pgm", c_outIO);       //thread to write out a PGM image
       on tile[0]: controlServer(c_outIO, c_buttons[0], b_interface[0], controlInterface, l_interface[0], c_control, continueChannel);
       on tile[1]: distributor(c_inIO, c_buttons[1], b_interface[1], l_interface[1], controlInterface, continueChannel);//thread to coordinate work on image
