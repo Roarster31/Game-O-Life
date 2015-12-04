@@ -8,11 +8,12 @@
 #include "i2c.h"
 #include <print.h>
 #include <stdlib.h>
+#include <limits.h>
 
 #define  IMHT 16                  //image height
 #define  IMWD 16                  //image width
 
-#define  WORKER_THREADS 7
+#define  WORKER_THREADS 6
 
 typedef unsigned char uchar;      //using uchar as shorthand
 
@@ -252,9 +253,17 @@ unsafe int makeDecision(uchar * unsafe arr, int startX, int startY) {
 }
 
 
+typedef struct BoundingBox {
+   int   left;
+   int   right;
+   int   top;
+   int   bottom;
+} BoundingBox;
+
 typedef interface ControlInterface {
-    void updateStatus(uchar * unsafe currentDataPointer, int currentRound, int liveCells);
+    void updateStatus(BoundingBox boundingBox, int currentRound, int liveCells);
     int isPaused();
+    void setOutputArrayPointer(uchar * unsafe outputArrayPointer);
 } ControlInterface;
 
 unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterface buttonInterface, server ControlInterface controlInterface, client LEDInterface l_interface,  chanend fromAcc, chanend continueChannel) {
@@ -262,7 +271,7 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
   int paused = 0;
 
 
-
+  BoundingBox currentBoundingBox;
   uchar * unsafe currentDataPointer;
   int currentRound;
   int currentLiveCells;
@@ -279,11 +288,26 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
           case controlInterface.isPaused() -> int returnVal:
               returnVal = paused;
               break;
-          case controlInterface.updateStatus(uchar * unsafe dataPointer, int round, int liveCells):
-              currentDataPointer = dataPointer;
+          case controlInterface.updateStatus(BoundingBox boundingBox, int round, int liveCells):
+              currentBoundingBox = boundingBox;
               currentRound = round;
               currentLiveCells = liveCells;
               break;
+          case controlInterface.setOutputArrayPointer(uchar * unsafe outputArrayPointer):
+                currentDataPointer = outputArrayPointer;
+          printf("\n");
+
+          for( int y = 0; y < IMHT; y++ ) {   //go through all lines
+                         for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
+                             int value = getItem(currentDataPointer, x, y);
+                             int pointerValue = currentDataPointer[x * IMWD + y];
+    //                         uchar value = encode(pointerValue); // outputs inverted value
+                             printf("%d",value);
+                         }
+                         printf("\n");
+
+                    }
+                break;
           case fromButton :> int buttonType:
               if(buttonType == SW2_CODE && !exporting) {
                   printf("Received export request\n");
@@ -296,8 +320,8 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
                   c_out <: '0';
                   for( int y = 0; y < IMHT; y++ ) {   //go through all lines
                        for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-                           int pointerValue = currentDataPointer[x * IMWD + y];
-                           uchar value = encode(pointerValue); // outputs inverted value
+
+                           uchar value = encode(getItem(currentDataPointer, x, y));
                            c_out <: value;
                        }
                   }
@@ -320,6 +344,17 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
                   printf("Current processing time: %d\n", elapsedTime/(100 * 100 * 100 * 100));
                   l_interface.setColour(1, 0, 0);
 
+                for( int y = 0; y < IMHT; y++ ) {   //go through all lines
+                     for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
+                         int value = getItem(currentDataPointer, x, y);
+                         int pointerValue = currentDataPointer[x * IMWD + y];
+//                         uchar value = encode(pointerValue); // outputs inverted value
+                         printf("%d",value);
+                     }
+                     printf("\n");
+
+                }
+
 
               } else {
                   printf("resuming...\n");
@@ -336,6 +371,15 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
   }
 }
 
+
+int min(int num1, int num2) {
+    return num1 < num2 ? num1 : num2;
+}
+
+int max(int num1, int num2) {
+    return num1 > num2 ? num1 : num2;
+}
+
 unsafe void workerThing(chanend distribChannel) {
     uchar * unsafe inArrayPointer;
     uchar * unsafe outArrayPointer;
@@ -344,7 +388,11 @@ unsafe void workerThing(chanend distribChannel) {
     int endX = 0;
     int endY = 0;
 
+
     while(1) {
+
+
+
         distribChannel :> inArrayPointer;
         distribChannel :> outArrayPointer;
 
@@ -353,27 +401,49 @@ unsafe void workerThing(chanend distribChannel) {
         distribChannel :> endX;
         distribChannel :> endY;
 
+        BoundingBox boundingBox;
+        boundingBox.left = endX;
+        boundingBox.right = startX;
+        boundingBox.top = startY;
+        boundingBox.bottom = endY;
 
-        int liveCells = 0;
+
+        unsigned liveCells = 0;
         for(int x = startX; x <= endX; x++){
             for(int y = startY; y <= endY; y++){
                 int alive = makeDecision(inArrayPointer, x, y);
+                if(alive) {
+                    boundingBox.left = min(x, boundingBox.left);
+                    boundingBox.right = max(x, boundingBox.right);
+                    boundingBox.top = min(y, boundingBox.top);
+                    boundingBox.bottom = max(y, boundingBox.bottom);
+                }
                 liveCells += alive;
                 setItem(outArrayPointer, x , y, alive);
             }
         }
 
+        //send back liveCells
         distribChannel <: liveCells;
+
+        //send back bounding box
+        distribChannel <: boundingBox;
     }
 }
 
-unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outArrayPointer, chanend workerChannels[n], unsigned n, client ControlInterface controlInterface, client LEDInterface l_interface, chanend continueChannel) {
 
-  controlInterface.updateStatus(inArrayPointer, 0, 0);
+
+
+unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outArrayPointer, chanend workerChannels[n], unsigned n, client ControlInterface controlInterface, client LEDInterface l_interface, chanend continueChannel, BoundingBox boundingBox) {
 
   int roundNumber = 0;
+  BoundingBox roundBoundingBox = boundingBox;
+  int totalLiveCells = 1;
 
-  while (1) {
+  controlInterface.setOutputArrayPointer(inArrayPointer);
+  controlInterface.updateStatus(roundBoundingBox, 0, 0);
+
+  while (roundNumber < 1) {
       roundNumber++;
 
 
@@ -381,27 +451,47 @@ unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outA
       //alternate LED
       l_interface.setSeparate(roundNumber % 2);
 
+      printf("roundBoundingBox.left: %d roundBoundingBox.right: %d roundBoundingBox.top: %d roundBoundingBox.bottom: %d\n",roundBoundingBox.left, roundBoundingBox.right, roundBoundingBox.top, roundBoundingBox.bottom);
       //dish out the jobs
-      int i=0;
+
       int completed = 0;
-      for(i; i<n; i++) {
+      BoundingBox tempBoundingBox;
+      int freeWorkers = n;
 
-          int startX = 0;
-          int startY = i;
-          int endX = IMWD;
-          int endY = i;
+      int row = 0;
 
-          //the data each worker needs to do its job
-          workerChannels[i] <: inArrayPointer;
-          workerChannels[i] <: outArrayPointer;
+      int top = bottom == IMHT ? 0 : max(0, roundBoundingBox.top);
+      int bottom = top == 0 ? IMHT : min(IMHT, roundBoundingBox.bottom);
+      int left = right == IMWD ? 0 : max(0, roundBoundingBox.left-1);
+      int right = left == 0 ? IMWD : min(IMWD, roundBoundingBox.right+1);
 
-          workerChannels[i] <: startX;
-          workerChannels[i] <: startY;
-          workerChannels[i] <: endX;
-          workerChannels[i] <: endY;
+      while(completed < IMHT && freeWorkers > 0 && row < n) {
+
+          if (row >= top && row <= bottom) {
+              int startX = left;
+              int startY = row;
+              int endX = right;
+              int endY = row;
+
+
+
+              int targetWorker = n - freeWorkers;
+              //the data each worker needs to do its job
+              workerChannels[targetWorker] <: inArrayPointer;
+              workerChannels[targetWorker] <: outArrayPointer;
+
+              workerChannels[targetWorker] <: startX;
+              workerChannels[targetWorker] <: startY;
+              workerChannels[targetWorker] <: endX;
+              workerChannels[targetWorker] <: endY;
+              freeWorkers--;
+          } else {
+              completed++;
+          }
+          row++;
       }
 
-      int totalLiveCells = 0;
+      totalLiveCells = 0;
 
 
       //wait for jobs to complete and dish out more if necessary
@@ -413,18 +503,27 @@ unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outA
               completed++;
 
 
+              //send back the bounding box, if no live cells then you should ignore
+              workerChannels[j] :> tempBoundingBox;
+
+              if(liveCells) {
+                  roundBoundingBox.left = min(roundBoundingBox.left, tempBoundingBox.left);
+
+                  roundBoundingBox.right = max(roundBoundingBox.right, tempBoundingBox.left);
+
+                  roundBoundingBox.top = min(roundBoundingBox.top, tempBoundingBox.top);
+
+                  roundBoundingBox.bottom = max(roundBoundingBox.bottom, tempBoundingBox.bottom);
+              }
+
               continueChannel <: 0;
 
-//              while(controlInterface.isPaused()) {
-//                  printf("paused\n");
-//              }
-
-              if(i < IMHT) {
+              if(row < IMHT) {
 
                   int startX = 0;
-                  int startY = i;
+                  int startY = row;
                   int endX = IMWD;
-                  int endY = i;
+                  int endY = row;
 
                   //the data each worker needs to do its job
                   workerChannels[j] <: inArrayPointer;
@@ -434,7 +533,9 @@ unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outA
                   workerChannels[j] <: startY;
                   workerChannels[j] <: endX;
                   workerChannels[j] <: endY;
-                  i++;
+                  row++;
+              } else {
+                  freeWorkers++;
               }
               break;
           }
@@ -468,10 +569,13 @@ unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outA
       inArrayPointer = outArrayPointer;
       outArrayPointer = swap;
 
+      controlInterface.setOutputArrayPointer(inArrayPointer);
       //update the control interface's current data pointer incase it wants to export what we have so far
-      controlInterface.updateStatus(inArrayPointer, roundNumber, totalLiveCells);
+      controlInterface.updateStatus(roundBoundingBox, roundNumber, totalLiveCells);
 
   }
+
+  printf("No live cells, game stops!!\n");
 
 
     //all done
@@ -494,10 +598,10 @@ unsafe void distributor(chanend c_in, chanend fromButton, client ButtonInterface
   //wait for SW1 to be pressed
   int buttonData = 0;
 
-  buttonInterface.showInterest();
-  while (buttonData != SW1_CODE) {
-      fromButton :> buttonData;
-  }
+//  buttonInterface.showInterest();
+//  while (buttonData != SW1_CODE) {
+//      fromButton :> buttonData;
+//  }
 
   l_interface.setColour(0,1,0);
 
@@ -505,14 +609,29 @@ unsafe void distributor(chanend c_in, chanend fromButton, client ButtonInterface
   uchar inArray[(((IMWD * IMHT)/8)+1)];
   uchar outArray[(((IMWD * IMHT)/8)+1)];
 
+  BoundingBox boundingBox;
+  boundingBox.left = IMWD;
+  boundingBox.right = 0;
+  boundingBox.top = IMHT;
+  boundingBox.bottom = 0;
+
   printf( "Processing...\n" );
+  int decoded;
   for( int y = 0; y < IMHT; y++ ) {   //go through all lines
     for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
       c_in :> val;
-      setItem(inArray, x, y, decode(val)); //reads in intermediate
+      decoded = decode(val);
+      if(decoded) {
+          boundingBox.left = min(x, boundingBox.left);
+          boundingBox.right = max(x, boundingBox.right);
+          boundingBox.top = min(y, boundingBox.top);
+          boundingBox.bottom = max(y, boundingBox.bottom);
+      }
+      setItem(inArray, x, y, decoded); //reads in intermediate
     }
   }
 
+  printf("BoundingBox left: %d, right: %d, top: %d, bottom: %d\n", boundingBox.left, boundingBox.right, boundingBox.top, boundingBox.bottom);
 
 
   l_interface.setColour(0,0,0);
@@ -523,7 +642,7 @@ unsafe void distributor(chanend c_in, chanend fromButton, client ButtonInterface
   chan workerChannels[WORKER_THREADS];
 
   par {
-            distributorServer(inArrayPointer, outArrayPointer, workerChannels, WORKER_THREADS, controlInterface, l_interface, continueChannel);
+            distributorServer(inArrayPointer, outArrayPointer, workerChannels, WORKER_THREADS, controlInterface, l_interface, continueChannel, boundingBox);
             {
                 par (int i=0; i<WORKER_THREADS; i++) {
                     workerThing(workerChannels[i]);
@@ -646,7 +765,7 @@ unsafe int main(void) {
       on tile[0]: accelerometer(i2c[0],c_control);        //client thread reading accelerometer data
       on tile[0]: DataInStream("test.pgm", c_inIO);          //thread to read in a PGM image
       on tile[0]: DataOutStream("testout.pgm", c_outIO);       //thread to write out a PGM image
-      on tile[0]: controlServer(c_outIO, c_buttons[0], b_interface[0], controlInterface, l_interface[0], c_control, continueChannel);
+      on tile[1]: controlServer(c_outIO, c_buttons[0], b_interface[0], controlInterface, l_interface[0], c_control, continueChannel);
       on tile[1]: distributor(c_inIO, c_buttons[1], b_interface[1], l_interface[1], controlInterface, continueChannel);//thread to coordinate work on image
   }
 
