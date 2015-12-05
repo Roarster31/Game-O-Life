@@ -3,12 +3,13 @@
 
 #include <platform.h>
 #include <xs1.h>
+#include "usb.h"
+#include "i2c.h"
+#include "xud_cdc.h"
+#include "app_virtual_com_extended.h"
+
 #include <stdio.h>
 #include "pgmIO.h"
-//#include "usb.h"
-#include "i2c.h"
-//#include "xud_cdc.h"
-//#include "app_virtual_com_extended.h"
 #include <print.h>
 #include <stdlib.h>
 #include <limits.h>
@@ -16,7 +17,7 @@
 #define  IMHT 16                  //image height
 #define  IMWD 16                  //image width
 
-#define  WORKER_THREADS 6
+#define  WORKER_THREADS 3
 
 typedef unsigned char uchar;      //using uchar as shorthand
 
@@ -94,7 +95,7 @@ int showLEDs(out port p, server LEDInterface l_interface[n], unsigned n) {
 
 
     pattern = (separateEnabled ) | (currentBlue * 2) | (currentGreen * 4) | (currentRed * 8);
-    p <: pattern;                //send pattern to LED port
+//    p <: pattern;                //send pattern to LED port
   }
   return 0;
 }
@@ -117,16 +118,16 @@ void buttonListener(in port b, chanend outChan[n], unsigned n, server ButtonInte
           case b_interface[int j].showInterest():
                   enabledChannels[j] = 1;
                   break;
-          case b when pinsneq(15) :> r:    // check if some p_button are pressed
-              if ((r==13) || (r==14)) {    // if either button is pressed
-                  for(int i=0; i<n; i++) {
-                      if (enabledChannels[i]) {
-                          outChan[i] <: r;             // send button pattern to outChan
-                          enabledChannels[i] = 0;
-                      }
-                  }
-              }
-              break;
+//          case b when pinsneq(15) :> r:    // check if some p_button are pressed
+//              if ((r==13) || (r==14)) {    // if either button is pressed
+//                  for(int i=0; i<n; i++) {
+//                      if (enabledChannels[i]) {
+//                          outChan[i] <: r;             // send button pattern to outChan
+//                          enabledChannels[i] = 0;
+//                      }
+//                  }
+//              }
+//              break;
       }
 
   }
@@ -307,9 +308,11 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
 
   unsigned deciCounter = 0;
 
+  buttonInterface.showInterest();
+
   while(1) {
 
-      buttonInterface.showInterest();
+
       select {
           case controlInterface.startTiming():
 //              printf("Timing starting now\n");
@@ -790,32 +793,32 @@ unsafe int main(void) {
   interface ControlInterface controlInterface;
 
   /* Channels to communicate with USB endpoints */
-//  chan c_ep_out[XUD_EP_COUNT_OUT], c_ep_in[XUD_EP_COUNT_IN];
+  chan c_ep_out[XUD_EP_COUNT_OUT], c_ep_in[XUD_EP_COUNT_IN];
   /* Interface to communicate with USB CDC (Virtual Serial) */
-//  interface usb_cdc_interface cdc_data;
+  interface usb_cdc_interface cdc_data;
   /* I2C interface */
   i2c_master_if i2c[1];
 
   par {
-//      on USB_TILE: xud(c_ep_out, XUD_EP_COUNT_OUT, c_ep_in, XUD_EP_COUNT_IN,
-//                       null, XUD_SPEED_HS, XUD_PWR_SELF);
+      on USB_TILE: xud(c_ep_out, XUD_EP_COUNT_OUT, c_ep_in, XUD_EP_COUNT_IN,
+                       null, XUD_SPEED_HS, XUD_PWR_SELF);
 
-//      on USB_TILE: Endpoint0(c_ep_out[0], c_ep_in[0]);
+      on USB_TILE: Endpoint0(c_ep_out[0], c_ep_in[0]);
 
-//      on USB_TILE: CdcEndpointsHandler(c_ep_in[1], c_ep_out[1], c_ep_in[2], cdc_data);
+      on USB_TILE: CdcEndpointsHandler(c_ep_in[1], c_ep_out[1], c_ep_in[2], cdc_data);
 
-//      on tile[0]: app_virtual_com_extended(cdc_data, i2c[0]);
 
-      on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);
-
-      on tile[0]: buttonListener(p_button, c_buttons, 2, b_interface, 2);
+      on USB_TILE: DataOutStream("testout.pgm", c_outIO);       //thread to write out a PGM image
+      on USB_TILE: DataInStream("test.pgm", c_inIO);          //thread to read in a PGM image
+      on USB_TILE: buttonListener(p_button, c_buttons, 2, b_interface, 2);
       on tile[0]: showLEDs(p_led, l_interface, 2);
-//      on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing accelerometer data
+
+
+      on tile[0]: app_virtual_com_extended(cdc_data);
+      on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);
       on tile[0]: accelerometer(i2c[0],c_control);        //client thread reading accelerometer data
-      on tile[0]: DataInStream("test.pgm", c_inIO);          //thread to read in a PGM image
-      on tile[0]: DataOutStream("testout.pgm", c_outIO);       //thread to write out a PGM image
-      on tile[1]: controlServer(c_outIO, c_buttons[0], b_interface[0], controlInterface, l_interface[0], c_control, continueChannel);
-      on tile[1]: distributor(c_inIO, c_buttons[1], b_interface[1], l_interface[1], controlInterface, continueChannel);//thread to coordinate work on image
+      on tile[0]: controlServer(c_outIO, c_buttons[0], b_interface[0], controlInterface, l_interface[0], c_control, continueChannel);
+      on tile[0]: distributor(c_inIO, c_buttons[1], b_interface[1], l_interface[1], controlInterface, continueChannel);//thread to coordinate work on image
   }
 
   return 0;
