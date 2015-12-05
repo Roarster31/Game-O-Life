@@ -39,9 +39,11 @@ on tile[0]: port p_sda = XS1_PORT_1F;
 
 #define TIMER_LIMIT 0xFFFFFFFE
 
-// I2C interface ports
-on tile[0] : in port p_button = XS1_PORT_4E; //port to access xCore-200 p_button
-on tile[0] : out port p_led = XS1_PORT_4F;   //port to access xCore-200 LEDs
+/* PORT_4A connected to the 4 LEDs */
+on tile[0]: port p_led = XS1_PORT_4F;
+
+/* PORT_4C connected to the 2 Buttons */
+on tile[0]: port p_button = XS1_PORT_4E;
 
 
 /* USB Endpoint Defines */
@@ -95,7 +97,7 @@ int showLEDs(out port p, server LEDInterface l_interface[n], unsigned n) {
 
 
     pattern = (separateEnabled ) | (currentBlue * 2) | (currentGreen * 4) | (currentRed * 8);
-//    p <: pattern;                //send pattern to LED port
+    p <: pattern;                //send pattern to LED port
   }
   return 0;
 }
@@ -118,16 +120,16 @@ void buttonListener(in port b, chanend outChan[n], unsigned n, server ButtonInte
           case b_interface[int j].showInterest():
                   enabledChannels[j] = 1;
                   break;
-//          case b when pinsneq(15) :> r:    // check if some p_button are pressed
-//              if ((r==13) || (r==14)) {    // if either button is pressed
-//                  for(int i=0; i<n; i++) {
-//                      if (enabledChannels[i]) {
-//                          outChan[i] <: r;             // send button pattern to outChan
-//                          enabledChannels[i] = 0;
-//                      }
-//                  }
-//              }
-//              break;
+          case b when pinsneq(15) :> r:    // check if some p_button are pressed
+              if ((r==13) || (r==14)) {    // if either button is pressed
+                  for(int i=0; i<n; i++) {
+                      if (enabledChannels[i]) {
+                          outChan[i] <: r;             // send button pattern to outChan
+                          enabledChannels[i] = 0;
+                      }
+                  }
+              }
+              break;
       }
 
   }
@@ -810,11 +812,11 @@ unsafe int main(void) {
 
       on USB_TILE: DataOutStream("testout.pgm", c_outIO);       //thread to write out a PGM image
       on USB_TILE: DataInStream("test.pgm", c_inIO);          //thread to read in a PGM image
-      on USB_TILE: buttonListener(p_button, c_buttons, 2, b_interface, 2);
+      on tile[0]: buttonListener(p_button, c_buttons, 2, b_interface, 2);
       on tile[0]: showLEDs(p_led, l_interface, 2);
 
 
-      on tile[0]: app_virtual_com_extended(cdc_data);
+      on USB_TILE: app_virtual_com_extended(cdc_data);
       on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);
       on tile[0]: accelerometer(i2c[0],c_control);        //client thread reading accelerometer data
       on tile[0]: controlServer(c_outIO, c_buttons[0], b_interface[0], controlInterface, l_interface[0], c_control, continueChannel);
