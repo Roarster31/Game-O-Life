@@ -52,6 +52,8 @@ on tile[0]: port p_button = XS1_PORT_4E;
 
 #define MENU_MAX_CHARS  30
 
+
+//todo I dont even know what to do with this.... except tell Death, "not today" :)
 char welcomeMessage[2][MENU_MAX_CHARS] = {
 
         {"Welcome, to your death"}
@@ -63,13 +65,6 @@ char HOME_CURSOR_CODE[2] = {"[H"};
 
 char NEW_LINE_CODE[4] = {"\r\n"};
 unsigned NEW_LINE_LENGTH = 4;
-
-/////////////////////////////////////////////////////////////////////////////////////////
-//
-//  Helper Functions provided for you
-//
-/////////////////////////////////////////////////////////////////////////////////////////
-
 
 int min(int num1, int num2) {
     return num1 < num2 ? num1 : num2;
@@ -124,9 +119,8 @@ int showLEDs(out port p, server LEDInterface l_interface[n], unsigned n) {
               break;
       }
 
-
     pattern = (separateEnabled ) | (currentBlue * 2) | (currentGreen * 4) | (currentRed * 8);
-    p <: pattern;                //send pattern to LED port
+    p <: pattern;        //send pattern to LED port
   }
   return 0;
 }
@@ -135,10 +129,10 @@ typedef interface ButtonInterface {
   void showInterest();
 } ButtonInterface;
 
-//READ BUTTONS and send button pattern to userAnt
+
 void buttonListener(in port b, chanend outChan[n], unsigned n, server ButtonInterface b_interface[m], unsigned m) {
   int r;
-  int enabledChannels[2]; //remember to use the same value as used in main because xc is a piece of crap :)
+  int enabledChannels[2];
   for(int i=0; i<n; i++) {
       enabledChannels[i] = 0;
   }
@@ -164,11 +158,7 @@ void buttonListener(in port b, chanend outChan[n], unsigned n, server ButtonInte
   }
 }
 
-/////////////////////////////////////////////////////////////////////////////////////////
-//
-// Read Image from PGM file from path infname[] to channel c_out
-//
-/////////////////////////////////////////////////////////////////////////////////////////
+
 void DataInStream(char infname[], chanend c_out) {
   int res;
   uchar line[ IMWD ];
@@ -186,9 +176,7 @@ void DataInStream(char infname[], chanend c_out) {
     _readinline( line, IMWD );
     for( int x = 0; x < IMWD; x++ ) {
       c_out <: line[ x ];
-//      printf( "-%4.1d ", line[ x ] ); //show image values
     }
-//    printf( "\n" );
   }
 
   //Close PGM image file
@@ -196,6 +184,7 @@ void DataInStream(char infname[], chanend c_out) {
   printf( "DataInStream:Done...\n" );
   return;
 }
+
 
 int decode(uchar input) {
     //convert from pgm to pbm
@@ -219,6 +208,7 @@ uchar encode(int intermediary) {
     return output;
 }
 
+
 unsafe int getItem(uchar * unsafe inArray, int x, int y) {
     while (x < 0) {
         x += IMWD;
@@ -239,6 +229,7 @@ unsafe int getItem(uchar * unsafe inArray, int x, int y) {
 
     return (inArray[ucharIndex] >> indexInUchar) & 1;
 }
+
 
 unsafe void setItem(uchar * unsafe inArray, int x, int y, int value) {
     while (x < 0) {
@@ -276,24 +267,15 @@ unsafe int makeDecision(uchar * unsafe arr, int startX, int startY) {
     int live = getItem(arr, startX, startY);
 
     if (live) {
-        if (liveNeighbours < 2) {
-//          any live cell with fewer than two live neighbours dies
-//            printf("Live cells dies [%d is fewer than 2 live neighbours] (%d,%d)\n", liveNeighbours, startX, startY);
+        if (liveNeighbours < 2) {   /*any live cell with fewer than two live neighbours dies*/
             return 0;
-        } else if (liveNeighbours > 3) {
-//          any live cell with more than three live neighbours dies
-//            printf("Live cells dies [%d is more than 3 live neighbours] (%d,%d)\n", liveNeighbours, startX, startY);
+        } else if (liveNeighbours > 3) {    /*any live cell with more than three live neighbours dies*/
             return 0;
-        } else {
-//          any live cell with two or three live neighbours is unaffected
-//            printf("Live cells unaffected (%d,%d)\n", startX, startY);
+        } else {    /*any live cell with two or three live neighbours is unaffected*/
             return 1;
         }
-
-    } else {
-            if (liveNeighbours == 3){
-//          any dead cell with exactly three live neighbours becomes alive
-//            printf("dead cells lives (%d,%d)\n", startX, startY);
+    }else{
+        if (liveNeighbours == 3){ /*any dead cell with exactly three live neighbours becomes alive*/
             return 1;
         }
     }
@@ -309,6 +291,7 @@ typedef struct BoundingBox {
    int   bottom;
 } BoundingBox;
 
+
 typedef interface ControlInterface {
     void updateStatus(BoundingBox boundingBox, int currentRound, int liveCells);
     unsigned int getElapsedTime();
@@ -317,13 +300,12 @@ typedef interface ControlInterface {
     void startTiming();
 } ControlInterface;
 
+
 unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterface buttonInterface, server ControlInterface controlInterface, client LEDInterface l_interface,  chanend fromAcc, chanend continueChannel, client interface usb_cdc_interface cdc) {
   int exporting = 0;
   int paused = 0;
   unsigned pointerSet = 0;
   unsigned usbRowLength = IMWD;
-
-
 
   BoundingBox currentBoundingBox;
   uchar * unsafe currentDataPointer;
@@ -353,10 +335,8 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
 
   while(1) {
 
-
       select {
           case controlInterface.startTiming():
-//              printf("Timing starting now\n");
               startTime = 1000 * 42 * totalClockCycles + deciCounter * 100;
               break;
           case controlInterface.getElapsedTime() -> unsigned int elapsed:
@@ -395,8 +375,6 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
                   exporting = 0;
 
                   l_interface.setColour(0,0,0);
-
-
               }
               buttonInterface.showInterest();
               break;
@@ -413,9 +391,7 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
                   printf("Total processing time: %d ms\n", elapsedTime);
                   printf("Total Processing throughput after %d rounds is %u ms per round.\n",currentRound, elapsedTime/currentRound);
                   l_interface.setColour(1, 0, 0);
-
               } else {
-
                   printf("resuming...\n");
                   l_interface.setColour(0, 0, 0);
 
@@ -437,24 +413,19 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
 
               //usb drawing section
               if (!paused && thisTime > framePeriodInc && pointerSet) {
-
                     framePeriodInc += framePeriod;
-
                     clearScreen(cdc);
-
                     for( int y = 0; y < IMHT; y++ ) {
                          for( int x = 0; x < IMWD; x++ ) {
                              int baseItem = getItem(currentDataPointer, x, y);
                              uchar value = baseItem == 0 ? '0' : '1';
                              usbRow[x] = value;
                          }
-
                          cdc.write(usbRow, usbRowLength);
-
                          cdc.write(NEW_LINE_CODE, NEW_LINE_LENGTH);
                     }
               }
-                break;
+              break;
       }
   }
 }
@@ -468,10 +439,7 @@ unsafe void workerThing(chanend distribChannel) {
     int endX = 0;
     int endY = 0;
 
-
     while(1) {
-
-
 
         distribChannel :> inArrayPointer;
         distribChannel :> outArrayPointer;
@@ -487,8 +455,6 @@ unsafe void workerThing(chanend distribChannel) {
         boundingBox.top = startY;
         boundingBox.bottom = endY;
 
-//        printf("@worker starting\n");
-
         unsigned liveCells = 0;
         for(int x = startX; x <= endX; x++){
             for(int y = startY; y <= endY; y++){
@@ -503,7 +469,6 @@ unsafe void workerThing(chanend distribChannel) {
                 setItem(outArrayPointer, x , y, alive);
             }
         }
-
         //send back liveCells
         distribChannel <: liveCells;
 
@@ -535,29 +500,25 @@ unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outA
       //alternate LED
       l_interface.setSeparate(roundNumber % 2);
 
-//      printf("roundBoundingBox.left: %d roundBoundingBox.right: %d roundBoundingBox.top: %d roundBoundingBox.bottom: %d\n",roundBoundingBox.left, roundBoundingBox.right, roundBoundingBox.top, roundBoundingBox.bottom);
-      //dish out the jobs
-
       int completed = 0;
       BoundingBox tempBoundingBox;
+
       int freeWorkers = n;
-
       int row = 0;
-
       int top = roundBoundingBox.bottom == (IMHT-1) ? 0 : max(0, roundBoundingBox.top-1);
       int bottom = roundBoundingBox.top == 0 ? IMHT : min(IMHT, roundBoundingBox.bottom+1);
       int left = roundBoundingBox.right == (IMWD-1) ? 0 : max(0, roundBoundingBox.left-1);
       int right = roundBoundingBox.left == 0 ? IMWD : min(IMWD, roundBoundingBox.right+1);
 
       while(completed < IMHT && freeWorkers > 0 && row < IMHT) {
-
           if (row >= top && row <= bottom) {
+
               int startX = left;
               int startY = row;
               int endX = right;
               int endY = row;
-
               int targetWorker = n - freeWorkers;
+
               //the data each worker needs to do its job
               workerChannels[targetWorker] <: inArrayPointer;
               workerChannels[targetWorker] <: outArrayPointer;
@@ -568,13 +529,10 @@ unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outA
               workerChannels[targetWorker] <: endY;
               freeWorkers--;
           } else {
-//              printf("skipping row %d because it's not between %d and %d\n", row, top, bottom);
               completed++;
           }
-
           row++;
       }
-//      printf("post loop => completed %d of %d, freeWorkers: %d, row %d of %d\n", completed, IMHT, freeWorkers, row, IMHT);
 
       totalLiveCells = 0;
       left = IMWD;
@@ -585,30 +543,23 @@ unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outA
 
       //wait for jobs to complete and dish out more if necessary
       while(completed < IMHT) {
-//          printf("@completed %d\n", completed);
           select {
               case workerChannels[int j] :> int liveCells:
               totalLiveCells += liveCells;
               completed++;
-
 
               //send back the bounding box, if no live cells then you should ignore
               workerChannels[j] :> tempBoundingBox;
 
               if(liveCells) {
                   left = min(left, tempBoundingBox.left);
-
                   right = max(right, tempBoundingBox.right);
-
                   top = min(top, tempBoundingBox.top);
-
                   bottom = max(bottom, tempBoundingBox.bottom);
               }
-
               continueChannel <: 0;
 
               if(row < IMHT) {
-
                   int startX = 0;
                   int startY = row;
                   int endX = IMWD;
@@ -631,34 +582,11 @@ unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outA
       }
 
 
-      //report back the round and image
-//      printf("\n\n------------ round %d ------------\n\n", roundNumber);
-//
-//      for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-//           for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-//             int gotItem = getItem(outArrayPointer, x, y);
-//             printf("%d",gotItem);
-//           }
-//           printf("\n");
-//      }
-
-
-      //wait before switching arrays if we're currently exporting from one
-
-
       continueChannel <: 0;
-
-//      while(controlInterface.isExporting()) {
-//                    //export
-//          printf("waiting\n");
-//      }
-
 
       uchar * unsafe swap = inArrayPointer;
       inArrayPointer = outArrayPointer;
       outArrayPointer = swap;
-
-//      printf("postprocessing => left: %d right: %d top: %d bottom: %d\n",left, right, top, bottom);
 
       roundBoundingBox.left = left;
       roundBoundingBox.right = right;
@@ -672,18 +600,9 @@ unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outA
   }
 
   printf("No live cells, game stops!!\n");
-
-
-    //all done
 }
 
-/////////////////////////////////////////////////////////////////////////////////////////
-//
-// Start your implementation by changing this function to implement the game of life
-// by farming out parts of the image to worker threads who implement it...
-// Currently the function just inverts the image
-//
-/////////////////////////////////////////////////////////////////////////////////////////
+
 unsafe void distributor(chanend c_in, chanend fromButton, client ButtonInterface buttonInterface, client LEDInterface l_interface, client ControlInterface controlInterface, chanend continueChannel) {
   uchar val;
 
@@ -693,14 +612,13 @@ unsafe void distributor(chanend c_in, chanend fromButton, client ButtonInterface
 
   //wait for SW1 to be pressed
   int buttonData = 0;
-
+//
 //  buttonInterface.showInterest();
 //  while (buttonData != SW1_CODE) {
 //      fromButton :> buttonData;
 //  }
 
   l_interface.setColour(0,1,0);
-
 
   uchar inArray[(((IMWD * IMHT)/8)+1)];
   uchar outArray[(((IMWD * IMHT)/8)+1)];
@@ -737,40 +655,33 @@ unsafe void distributor(chanend c_in, chanend fromButton, client ButtonInterface
   chan workerChannels[WORKER_THREADS];
 
   par {
-            distributorServer(inArrayPointer, outArrayPointer, workerChannels, WORKER_THREADS, controlInterface, l_interface, continueChannel, boundingBox);
-            {
-                par (int i=0; i<WORKER_THREADS; i++) {
-                    workerThing(workerChannels[i]);
-                }
+        distributorServer(inArrayPointer, outArrayPointer, workerChannels, WORKER_THREADS, controlInterface, l_interface, continueChannel, boundingBox);
+        {
+            par (int i=0; i<WORKER_THREADS; i++) {
+                workerThing(workerChannels[i]);
             }
         }
+      }
 
 
 
 }
 
-/////////////////////////////////////////////////////////////////////////////////////////
-//
-// Write pixel stream from channel c_in to PGM image file
-//
-/////////////////////////////////////////////////////////////////////////////////////////
+
 void DataOutStream(char outfname[], chanend c_in) {
   int res;
   uchar line[ IMWD ];
 
-
-
   while(1) {
-
       c_in :> line[0];
 
       //Open PGM file
-        printf( "DataOutStream:Start...\n" );
-        res = _openoutpgm( outfname, IMWD, IMHT );
-        if( res ) {
-          printf( "DataOutStream:Error opening %s\n.", outfname );
-          return;
-        }
+      printf( "DataOutStream:Start...\n" );
+      res = _openoutpgm( outfname, IMWD, IMHT );
+      if( res ) {
+        printf( "DataOutStream:Error opening %s\n.", outfname );
+        return;
+      }
 
       //Compile each line of the image and write the image line-by-line
       for( int y = 0; y < IMHT; y++ ) {
@@ -787,11 +698,7 @@ void DataOutStream(char outfname[], chanend c_in) {
   return;
 }
 
-/////////////////////////////////////////////////////////////////////////////////////////
-//
-// Initialise and  read accelerometer, send first tilt event to channel
-//
-/////////////////////////////////////////////////////////////////////////////////////////
+
 void accelerometer(client interface i2c_master_if i2c, chanend toDist) {
   i2c_regop_res_t result;
   char status_data = 0;
@@ -835,11 +742,7 @@ void accelerometer(client interface i2c_master_if i2c, chanend toDist) {
   }
 }
 
-/////////////////////////////////////////////////////////////////////////////////////////
-//
-// Orchestrate concurrent system and start up all threads
-//
-/////////////////////////////////////////////////////////////////////////////////////////
+
 unsafe int main(void) {
 
 //  char infname[] = "test.pgm";     //put your input image path here
