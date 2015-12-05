@@ -9,8 +9,8 @@
 #include <print.h>
 #include <stdlib.h>
 
-#define  IMHT 16                  //image height
-#define  IMWD 16                  //image width
+#define  IMHT 256                  //image height
+#define  IMWD 256                  //image width
 
 #define  WORKER_THREADS 7
 
@@ -32,7 +32,7 @@ on tile[0]: port p_sda = XS1_PORT_1F;
 #define SW1_CODE 0xE
 #define SW2_CODE 0xD
 
-#define TIMER_LIMIT 0x7FFFFFFF
+#define TIMER_LIMIT 0xFFFFFFFE
 
 on tile[0] : in port buttons = XS1_PORT_4E; //port to access xCore-200 buttons
 on tile[0] : out port leds = XS1_PORT_4F;   //port to access xCore-200 LEDs
@@ -138,7 +138,7 @@ void DataInStream(char infname[], chanend c_out) {
       c_out <: line[ x ];
 //      printf( "-%4.1d ", line[ x ] ); //show image values
     }
-    printf( "\n" );
+//    printf( "\n" );
   }
 
   //Close PGM image file
@@ -267,7 +267,9 @@ unsafe int worker(uchar * unsafe inArr, uchar * unsafe outArr, int startX, int s
 
 typedef interface ControlInterface {
     void updateStatus(uchar * unsafe currentDataPointer, int currentRound, int liveCells);
+    unsigned int getElapsedTime();
     int isPaused();
+    void startTiming();
 } ControlInterface;
 
 unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterface buttonInterface, server ControlInterface controlInterface, client LEDInterface l_interface,  chanend fromAcc, chanend continueChannel) {
@@ -284,11 +286,26 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
   unsigned int startTime;
   unsigned int pauseStartTime;
   unsigned int totalLostTime = 0;
-  time :> startTime;
+  int totalClockCycles = 0;
+
+  unsigned period = 10000000;
+  unsigned periodInc = period;
+  unsigned lastTime = 0;
+
+  unsigned deciCounter = 0;
 
   while(1) {
+
       buttonInterface.showInterest();
       select {
+          case controlInterface.startTiming():
+//              printf("Timing starting now\n");
+              startTime = 1000 * 42 * totalClockCycles + deciCounter * 100;
+              break;
+          case controlInterface.getElapsedTime() -> unsigned int elapsed:
+              unsigned int currentTime = 1000 * 42 * totalClockCycles + deciCounter * 100;
+              elapsed = currentTime - startTime - totalLostTime;
+              break;
           case controlInterface.isPaused() -> int returnVal:
               returnVal = paused;
               break;
@@ -325,25 +342,38 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
               break;
           case fromAcc :> paused:
               if (paused) {
-                  time :> pauseStartTime;
-                  unsigned int elapsedTime = pauseStartTime - startTime - totalLostTime;
+                  pauseStartTime = 1000 * 42 * totalClockCycles + deciCounter * 100;
+                  unsigned int elapsedTime =  pauseStartTime - startTime - totalLostTime;
                   printf("----Paused----\n");
+                  printf("total lost time %d ",totalLostTime);
                   printf("Current round: %d ", currentRound);
                   printf("Current live cells: %d ", currentLiveCells);
-                  printf("Current processing time: %d\n", elapsedTime/(100 * 100 * 100 * 100));
+                  printf("Current processing time: %u ms\n",elapsedTime);
+                  printf("Total Processing throughput after %d rounds is %u ms per round.\n",currentRound, elapsedTime/currentRound);
                   l_interface.setColour(1, 0, 0);
 
 
               } else {
+
                   printf("resuming...\n");
                   l_interface.setColour(0, 0, 0);
 
-                  unsigned int endTime;
-                  time :> endTime;
+                  unsigned int endTime = 1000 * 42 * totalClockCycles + deciCounter * 100;
                   totalLostTime += endTime - pauseStartTime;
               }
               break;
           case !paused && !exporting => continueChannel :> int data:
+              break;
+          case time when timerafter(periodInc) :> unsigned thisTime:
+              deciCounter++;
+              periodInc += period;
+
+              if(lastTime > thisTime) {
+//                  printf("MOTHAFUCKA, WE'VE GONE BACK TO THE FUTURE (because %u > %u)\n", lastTime, thisTime);
+                  deciCounter = 0;
+                  totalClockCycles ++;
+              }
+              lastTime = thisTime;
               break;
       }
   }
@@ -381,6 +411,10 @@ unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outA
 
   while (1) {
       roundNumber++;
+      if(roundNumber == 100){
+          unsigned int timeTaken = controlInterface.getElapsedTime();
+          printf("Processed the first %d rounds in %u ms\n",roundNumber,timeTaken);
+      }
 
 
 
@@ -518,7 +552,7 @@ unsafe void distributor(chanend c_in, chanend fromButton, client ButtonInterface
       setItem(inArray, x, y, decode(val)); //reads in intermediate
     }
   }
-
+  controlInterface.startTiming();
 
 
   l_interface.setColour(0,0,0);
@@ -650,7 +684,7 @@ unsafe int main(void) {
       on tile[0]: showLEDs(leds, l_interface, 2);
       on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing accelerometer data
       on tile[0]: accelerometer(i2c[0],c_control);        //client thread reading accelerometer data
-      on tile[0]: DataInStream("test.pgm", c_inIO);          //thread to read in a PGM image
+      on tile[0]: DataInStream("256x256.pgm", c_inIO);          //thread to read in a PGM image
       on tile[0]: DataOutStream("testout.pgm", c_outIO);       //thread to write out a PGM image
       on tile[0]: controlServer(c_outIO, c_buttons[0], b_interface[0], controlInterface, l_interface[0], c_control, continueChannel);
       on tile[1]: distributor(c_inIO, c_buttons[1], b_interface[1], l_interface[1], controlInterface, continueChannel);//thread to coordinate work on image
