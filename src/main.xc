@@ -14,8 +14,8 @@
 #include <stdlib.h>
 #include <limits.h>
 
-#define  IMHT 64                  //image height
-#define  IMWD 64                  //image width
+#define  IMHT 256                  //image height
+#define  IMWD 256                  //image width
 
 #define  WORKER_THREADS 3
 
@@ -57,6 +57,13 @@ char welcomeMessage[2][MENU_MAX_CHARS] = {
         {"Welcome, to your death"}
 };
 
+char CLEAR_SCREEN_CODE[3] = {"[2J"};
+
+char HOME_CURSOR_CODE[2] = {"[H"};
+
+char NEW_LINE_CODE[4] = {"\r\n"};
+unsigned NEW_LINE_LENGTH = 4;
+
 /////////////////////////////////////////////////////////////////////////////////////////
 //
 //  Helper Functions provided for you
@@ -70,6 +77,21 @@ int min(int num1, int num2) {
 
 int max(int num1, int num2) {
     return num1 > num2 ? num1 : num2;
+}
+
+
+void clearScreen(client interface usb_cdc_interface cdc) {
+    unsigned length = 4;
+    cdc.write(NEW_LINE_CODE, NEW_LINE_LENGTH);
+    cdc.put_char(27);
+
+    length = 2;
+    cdc.write(CLEAR_SCREEN_CODE, length); // clear screen
+
+    cdc.put_char(27); // ESC
+
+    length = 2;
+    cdc.write(HOME_CURSOR_CODE, length); // cursor to home
 }
 
 typedef interface LEDInterface {
@@ -298,7 +320,8 @@ typedef interface ControlInterface {
 unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterface buttonInterface, server ControlInterface controlInterface, client LEDInterface l_interface,  chanend fromAcc, chanend continueChannel, client interface usb_cdc_interface cdc) {
   int exporting = 0;
   int paused = 0;
-  unsigned length;
+  unsigned pointerSet = 0;
+  unsigned usbRowLength = IMWD;
 
 
 
@@ -307,15 +330,22 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
   int currentRound;
   int currentLiveCells;
 
+  char usbRow[IMWD];
+
   timer time;
   unsigned int startTime;
   unsigned int pauseStartTime;
   unsigned int totalLostTime = 0;
   int totalClockCycles = 0;
 
+
+
   unsigned period = 10000000;
   unsigned periodInc = period;
   unsigned lastTime = 0;
+
+  unsigned framePeriod = 10000000;
+  unsigned framePeriodInc = framePeriod;
 
   unsigned deciCounter = 0;
 
@@ -343,43 +373,7 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
               break;
           case controlInterface.setOutputArrayPointer(uchar * unsafe outputArrayPointer):
               currentDataPointer = outputArrayPointer;
-              char row[IMWD];
-              for(int i=0; i<IMWD; i++) {
-                  row[i] = 32;
-              }
-              char newline[4] = {"\r\n"};
-              length = 4;
-
-//              for (int i=0; i<IMHT; i++) {
-//                  cdc.write(newline, length);
-//              }
-
-              cdc.put_char(27);
-              char code[3] = {"[2J"};
-              length = 3;
-              cdc.write(code, length); // clear screen
-              cdc.put_char(27); // ESC
-              char code2[2] = {"[H"};
-              length = 2;
-              cdc.write(code2, length); // cursor to home
-
-              for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-//                  printf("row: ");
-                   for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-                       int baseItem = getItem(currentDataPointer, x, y);
-                       uchar value = baseItem == 0 ? '0' : '1';
-                       row[x] = value;
-//                       printf("%c", value);
-                   }
-//                   printf("\n");
-                   length = IMWD;
-                   cdc.write(row, length);
-                   length = 4;
-                   cdc.write(newline, length);
-              }
-
-//              printf("sending over usb\n");
-
+              pointerSet = 1;
                 break;
           case fromButton :> int buttonType:
               if(buttonType == SW2_CODE && !exporting) {
@@ -436,16 +430,34 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
               periodInc += period;
 
               if(lastTime > thisTime) {
-//                  printf("MOTHAFUCKA, WE'VE GONE BACK TO THE FUTURE (because %u > %u)\n", lastTime, thisTime);
                   deciCounter = 0;
                   totalClockCycles ++;
               }
               lastTime = thisTime;
-              break;
+
+              //usb drawing section
+              if (!paused && thisTime > framePeriodInc && pointerSet) {
+
+                    framePeriodInc += framePeriod;
+
+                    clearScreen(cdc);
+
+                    for( int y = 0; y < IMHT; y++ ) {
+                         for( int x = 0; x < IMWD; x++ ) {
+                             int baseItem = getItem(currentDataPointer, x, y);
+                             uchar value = baseItem == 0 ? '0' : '1';
+                             usbRow[x] = value;
+                         }
+
+                         cdc.write(usbRow, usbRowLength);
+
+                         cdc.write(NEW_LINE_CODE, NEW_LINE_LENGTH);
+                    }
+              }
+                break;
       }
   }
 }
-
 
 
 unsafe void workerThing(chanend distribChannel) {
@@ -515,7 +527,7 @@ unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outA
   while (totalLiveCells) {
       roundNumber++;
 
-if(roundNumber == 100){
+      if(roundNumber == 100){
           unsigned int timeTaken = controlInterface.getElapsedTime();
           printf("Processed the first %d rounds in %u ms\n",roundNumber,timeTaken);
       }
@@ -848,23 +860,17 @@ unsafe int main(void) {
   i2c_master_if i2c[1];
 
   par {
-      on USB_TILE: xud(c_ep_out, XUD_EP_COUNT_OUT, c_ep_in, XUD_EP_COUNT_IN,
-                       null, XUD_SPEED_HS, XUD_PWR_SELF);
-
+      on USB_TILE: xud(c_ep_out, XUD_EP_COUNT_OUT, c_ep_in, XUD_EP_COUNT_IN, null, XUD_SPEED_HS, XUD_PWR_SELF);
       on USB_TILE: Endpoint0(c_ep_out[0], c_ep_in[0]);
-
       on USB_TILE: CdcEndpointsHandler(c_ep_in[1], c_ep_out[1], c_ep_in[2], cdc_data);
-
-
       on USB_TILE: DataOutStream("testout.pgm", c_outIO);       //thread to write out a PGM image
-      on USB_TILE: DataInStream("64x64.pgm", c_inIO);          //thread to read in a PGM image
+      on USB_TILE: DataInStream("256x256.pgm", c_inIO);          //thread to read in a PGM image
+
       on tile[0]: buttonListener(p_button, c_buttons, 2, b_interface, 2);
       on tile[0]: showLEDs(p_led, l_interface, 2);
-
-
-//      on USB_TILE: app_virtual_com_extended(cdc_data);
       on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);
       on tile[0]: accelerometer(i2c[0],c_control);        //client thread reading accelerometer data
+
       on tile[0]: controlServer(c_outIO, c_buttons[0], b_interface[0], controlInterface, l_interface[0], c_control, continueChannel, cdc_data);
       on tile[0]: distributor(c_inIO, c_buttons[1], b_interface[1], l_interface[1], controlInterface, continueChannel);//thread to coordinate work on image
   }
