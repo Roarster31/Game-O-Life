@@ -45,6 +45,14 @@ on tile[0] : out port leds = XS1_PORT_4F;   //port to access xCore-200 LEDs
 /////////////////////////////////////////////////////////////////////////////////////////
 
 
+int min(int num1, int num2) {
+    return num1 < num2 ? num1 : num2;
+}
+
+int max(int num1, int num2) {
+    return num1 > num2 ? num1 : num2;
+}
+
 typedef interface LEDInterface {
   void setSeparate(int enabled);
   void setColour(int currentRed, int currentGreen, int currentBlue);
@@ -295,18 +303,6 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
               break;
           case controlInterface.setOutputArrayPointer(uchar * unsafe outputArrayPointer):
                 currentDataPointer = outputArrayPointer;
-          printf("\n");
-
-          for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-                         for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-                             int value = getItem(currentDataPointer, x, y);
-                             int pointerValue = currentDataPointer[x * IMWD + y];
-    //                         uchar value = encode(pointerValue); // outputs inverted value
-                             printf("%d",value);
-                         }
-                         printf("\n");
-
-                    }
                 break;
           case fromButton :> int buttonType:
               if(buttonType == SW2_CODE && !exporting) {
@@ -320,7 +316,6 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
                   c_out <: '0';
                   for( int y = 0; y < IMHT; y++ ) {   //go through all lines
                        for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-
                            uchar value = encode(getItem(currentDataPointer, x, y));
                            c_out <: value;
                        }
@@ -339,22 +334,13 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
                   time :> pauseStartTime;
                   unsigned int elapsedTime = pauseStartTime - startTime - totalLostTime;
                   printf("----Paused----\n");
-                  printf("Current round: %d ", currentRound);
-                  printf("Current live cells: %d ", currentLiveCells);
-                  printf("Current processing time: %d\n", elapsedTime/(100 * 100 * 100 * 100));
+                  printf("Current round: %d, ", currentRound);
+                  printf("Current live cells: %d, ", currentLiveCells);
+                  printf("Current processing time: %d, ", elapsedTime/(100 * 100 * 100 * 100));
+                  int boundingPixels = (currentBoundingBox.right - currentBoundingBox.left + 3) * (currentBoundingBox.bottom - currentBoundingBox.top + 3);
+                  int totalPixels = IMWD * IMHT;
+                  printf("Bounding box between points (%d,%d) and (%d,%d) means we're only processing %d out of %d pixels\n",currentBoundingBox.left, currentBoundingBox.top, currentBoundingBox.right, currentBoundingBox.bottom, boundingPixels, totalPixels);
                   l_interface.setColour(1, 0, 0);
-
-                for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-                     for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-                         int value = getItem(currentDataPointer, x, y);
-                         int pointerValue = currentDataPointer[x * IMWD + y];
-//                         uchar value = encode(pointerValue); // outputs inverted value
-                         printf("%d",value);
-                     }
-                     printf("\n");
-
-                }
-
 
               } else {
                   printf("resuming...\n");
@@ -372,13 +358,6 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
 }
 
 
-int min(int num1, int num2) {
-    return num1 < num2 ? num1 : num2;
-}
-
-int max(int num1, int num2) {
-    return num1 > num2 ? num1 : num2;
-}
 
 unsafe void workerThing(chanend distribChannel) {
     uchar * unsafe inArrayPointer;
@@ -407,6 +386,7 @@ unsafe void workerThing(chanend distribChannel) {
         boundingBox.top = startY;
         boundingBox.bottom = endY;
 
+//        printf("@worker starting\n");
 
         unsigned liveCells = 0;
         for(int x = startX; x <= endX; x++){
@@ -443,15 +423,13 @@ unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outA
   controlInterface.setOutputArrayPointer(inArrayPointer);
   controlInterface.updateStatus(roundBoundingBox, 0, 0);
 
-  while (roundNumber < 1) {
+  while (totalLiveCells) {
       roundNumber++;
-
-
 
       //alternate LED
       l_interface.setSeparate(roundNumber % 2);
 
-      printf("roundBoundingBox.left: %d roundBoundingBox.right: %d roundBoundingBox.top: %d roundBoundingBox.bottom: %d\n",roundBoundingBox.left, roundBoundingBox.right, roundBoundingBox.top, roundBoundingBox.bottom);
+//      printf("roundBoundingBox.left: %d roundBoundingBox.right: %d roundBoundingBox.top: %d roundBoundingBox.bottom: %d\n",roundBoundingBox.left, roundBoundingBox.right, roundBoundingBox.top, roundBoundingBox.bottom);
       //dish out the jobs
 
       int completed = 0;
@@ -460,20 +438,18 @@ unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outA
 
       int row = 0;
 
-      int top = bottom == IMHT ? 0 : max(0, roundBoundingBox.top);
-      int bottom = top == 0 ? IMHT : min(IMHT, roundBoundingBox.bottom);
-      int left = right == IMWD ? 0 : max(0, roundBoundingBox.left-1);
-      int right = left == 0 ? IMWD : min(IMWD, roundBoundingBox.right+1);
+      int top = roundBoundingBox.bottom == (IMHT-1) ? 0 : max(0, roundBoundingBox.top-1);
+      int bottom = roundBoundingBox.top == 0 ? IMHT : min(IMHT, roundBoundingBox.bottom+1);
+      int left = roundBoundingBox.right == (IMWD-1) ? 0 : max(0, roundBoundingBox.left-1);
+      int right = roundBoundingBox.left == 0 ? IMWD : min(IMWD, roundBoundingBox.right+1);
 
-      while(completed < IMHT && freeWorkers > 0 && row < n) {
+      while(completed < IMHT && freeWorkers > 0 && row < IMHT) {
 
           if (row >= top && row <= bottom) {
               int startX = left;
               int startY = row;
               int endX = right;
               int endY = row;
-
-
 
               int targetWorker = n - freeWorkers;
               //the data each worker needs to do its job
@@ -486,17 +462,24 @@ unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outA
               workerChannels[targetWorker] <: endY;
               freeWorkers--;
           } else {
+//              printf("skipping row %d because it's not between %d and %d\n", row, top, bottom);
               completed++;
           }
+
           row++;
       }
+//      printf("post loop => completed %d of %d, freeWorkers: %d, row %d of %d\n", completed, IMHT, freeWorkers, row, IMHT);
 
       totalLiveCells = 0;
+      left = IMWD;
+      right = 0;
+      top = IMHT;
+      bottom = 0;
 
 
       //wait for jobs to complete and dish out more if necessary
       while(completed < IMHT) {
-
+//          printf("@completed %d\n", completed);
           select {
               case workerChannels[int j] :> int liveCells:
               totalLiveCells += liveCells;
@@ -507,13 +490,13 @@ unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outA
               workerChannels[j] :> tempBoundingBox;
 
               if(liveCells) {
-                  roundBoundingBox.left = min(roundBoundingBox.left, tempBoundingBox.left);
+                  left = min(left, tempBoundingBox.left);
 
-                  roundBoundingBox.right = max(roundBoundingBox.right, tempBoundingBox.left);
+                  right = max(right, tempBoundingBox.right);
 
-                  roundBoundingBox.top = min(roundBoundingBox.top, tempBoundingBox.top);
+                  top = min(top, tempBoundingBox.top);
 
-                  roundBoundingBox.bottom = max(roundBoundingBox.bottom, tempBoundingBox.bottom);
+                  bottom = max(bottom, tempBoundingBox.bottom);
               }
 
               continueChannel <: 0;
@@ -568,6 +551,13 @@ unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outA
       uchar * unsafe swap = inArrayPointer;
       inArrayPointer = outArrayPointer;
       outArrayPointer = swap;
+
+//      printf("postprocessing => left: %d right: %d top: %d bottom: %d\n",left, right, top, bottom);
+
+      roundBoundingBox.left = left;
+      roundBoundingBox.right = right;
+      roundBoundingBox.top = top;
+      roundBoundingBox.bottom = bottom;
 
       controlInterface.setOutputArrayPointer(inArrayPointer);
       //update the control interface's current data pointer incase it wants to export what we have so far
@@ -627,12 +617,10 @@ unsafe void distributor(chanend c_in, chanend fromButton, client ButtonInterface
           boundingBox.top = min(y, boundingBox.top);
           boundingBox.bottom = max(y, boundingBox.bottom);
       }
+      setItem(outArray, x, y, 0);
       setItem(inArray, x, y, decoded); //reads in intermediate
     }
   }
-
-  printf("BoundingBox left: %d, right: %d, top: %d, bottom: %d\n", boundingBox.left, boundingBox.right, boundingBox.top, boundingBox.bottom);
-
 
   l_interface.setColour(0,0,0);
 
