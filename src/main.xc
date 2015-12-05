@@ -5,9 +5,9 @@
 #include <xs1.h>
 #include <stdio.h>
 #include "pgmIO.h"
-#include "usb.h"
+//#include "usb.h"
 #include "i2c.h"
-#include "xud_cdc.h"
+//#include "xud_cdc.h"
 //#include "app_virtual_com_extended.h"
 #include <print.h>
 #include <stdlib.h>
@@ -36,7 +36,7 @@ on tile[0]: port p_sda = XS1_PORT_1F;
 #define SW1_CODE 0xE
 #define SW2_CODE 0xD
 
-#define TIMER_LIMIT 0x7FFFFFFF
+#define TIMER_LIMIT 0xFFFFFFFE
 
 // I2C interface ports
 on tile[0] : in port p_button = XS1_PORT_4E; //port to access xCore-200 p_button
@@ -156,7 +156,7 @@ void DataInStream(char infname[], chanend c_out) {
       c_out <: line[ x ];
 //      printf( "-%4.1d ", line[ x ] ); //show image values
     }
-    printf( "\n" );
+//    printf( "\n" );
   }
 
   //Close PGM image file
@@ -279,8 +279,10 @@ typedef struct BoundingBox {
 
 typedef interface ControlInterface {
     void updateStatus(BoundingBox boundingBox, int currentRound, int liveCells);
+    unsigned int getElapsedTime();
     int isPaused();
     void setOutputArrayPointer(uchar * unsafe outputArrayPointer);
+    void startTiming();
 } ControlInterface;
 
 unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterface buttonInterface, server ControlInterface controlInterface, client LEDInterface l_interface,  chanend fromAcc, chanend continueChannel) {
@@ -297,11 +299,26 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
   unsigned int startTime;
   unsigned int pauseStartTime;
   unsigned int totalLostTime = 0;
-  time :> startTime;
+  int totalClockCycles = 0;
+
+  unsigned period = 10000000;
+  unsigned periodInc = period;
+  unsigned lastTime = 0;
+
+  unsigned deciCounter = 0;
 
   while(1) {
+
       buttonInterface.showInterest();
       select {
+          case controlInterface.startTiming():
+//              printf("Timing starting now\n");
+              startTime = 1000 * 42 * totalClockCycles + deciCounter * 100;
+              break;
+          case controlInterface.getElapsedTime() -> unsigned int elapsed:
+              unsigned int currentTime = 1000 * 42 * totalClockCycles + deciCounter * 100;
+              elapsed = currentTime - startTime - totalLostTime;
+              break;
           case controlInterface.isPaused() -> int returnVal:
               returnVal = paused;
               break;
@@ -340,27 +357,39 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
               break;
           case fromAcc :> paused:
               if (paused) {
-                  time :> pauseStartTime;
-                  unsigned int elapsedTime = pauseStartTime - startTime - totalLostTime;
+                  pauseStartTime = 1000 * 42 * totalClockCycles + deciCounter * 100;
+                  unsigned int elapsedTime =  pauseStartTime - startTime - totalLostTime;
                   printf("----Paused----\n");
-                  printf("Current round: %d, ", currentRound);
-                  printf("Current live cells: %d, ", currentLiveCells);
-                  printf("Current processing time: %d, ", elapsedTime/(100 * 100 * 100 * 100));
+                  printf("Round = %d\n", currentRound);
+                  printf("Total live cells = %d\n", currentLiveCells);
                   int boundingPixels = (currentBoundingBox.right - currentBoundingBox.left + 3) * (currentBoundingBox.bottom - currentBoundingBox.top + 3);
                   int totalPixels = IMWD * IMHT;
                   printf("Bounding box between points (%d,%d) and (%d,%d) means we're only processing %d out of %d pixels\n",currentBoundingBox.left, currentBoundingBox.top, currentBoundingBox.right, currentBoundingBox.bottom, boundingPixels, totalPixels);
+                  printf("Total processing time: %d ms\n", elapsedTime);
+                  printf("Total Processing throughput after %d rounds is %u ms per round.\n",currentRound, elapsedTime/currentRound);
                   l_interface.setColour(1, 0, 0);
 
               } else {
+
                   printf("resuming...\n");
                   l_interface.setColour(0, 0, 0);
 
-                  unsigned int endTime;
-                  time :> endTime;
+                  unsigned int endTime = 1000 * 42 * totalClockCycles + deciCounter * 100;
                   totalLostTime += endTime - pauseStartTime;
               }
               break;
           case !paused && !exporting => continueChannel :> int data:
+              break;
+          case time when timerafter(periodInc) :> unsigned thisTime:
+              deciCounter++;
+              periodInc += period;
+
+              if(lastTime > thisTime) {
+//                  printf("MOTHAFUCKA, WE'VE GONE BACK TO THE FUTURE (because %u > %u)\n", lastTime, thisTime);
+                  deciCounter = 0;
+                  totalClockCycles ++;
+              }
+              lastTime = thisTime;
               break;
       }
   }
@@ -434,6 +463,11 @@ unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outA
 
   while (totalLiveCells) {
       roundNumber++;
+
+if(roundNumber == 100){
+          unsigned int timeTaken = controlInterface.getElapsedTime();
+          printf("Processed the first %d rounds in %u ms\n",roundNumber,timeTaken);
+      }
 
       //alternate LED
       l_interface.setSeparate(roundNumber % 2);
@@ -630,6 +664,7 @@ unsafe void distributor(chanend c_in, chanend fromButton, client ButtonInterface
       setItem(inArray, x, y, decoded); //reads in intermediate
     }
   }
+  controlInterface.startTiming();
 
   l_interface.setColour(0,0,0);
 
@@ -755,19 +790,19 @@ unsafe int main(void) {
   interface ControlInterface controlInterface;
 
   /* Channels to communicate with USB endpoints */
-  chan c_ep_out[XUD_EP_COUNT_OUT], c_ep_in[XUD_EP_COUNT_IN];
+//  chan c_ep_out[XUD_EP_COUNT_OUT], c_ep_in[XUD_EP_COUNT_IN];
   /* Interface to communicate with USB CDC (Virtual Serial) */
-  interface usb_cdc_interface cdc_data;
+//  interface usb_cdc_interface cdc_data;
   /* I2C interface */
   i2c_master_if i2c[1];
 
   par {
-      on USB_TILE: xud(c_ep_out, XUD_EP_COUNT_OUT, c_ep_in, XUD_EP_COUNT_IN,
-                       null, XUD_SPEED_HS, XUD_PWR_SELF);
+//      on USB_TILE: xud(c_ep_out, XUD_EP_COUNT_OUT, c_ep_in, XUD_EP_COUNT_IN,
+//                       null, XUD_SPEED_HS, XUD_PWR_SELF);
 
-      on USB_TILE: Endpoint0(c_ep_out[0], c_ep_in[0]);
+//      on USB_TILE: Endpoint0(c_ep_out[0], c_ep_in[0]);
 
-      on USB_TILE: CdcEndpointsHandler(c_ep_in[1], c_ep_out[1], c_ep_in[2], cdc_data);
+//      on USB_TILE: CdcEndpointsHandler(c_ep_in[1], c_ep_out[1], c_ep_in[2], cdc_data);
 
 //      on tile[0]: app_virtual_com_extended(cdc_data, i2c[0]);
 

@@ -17,10 +17,12 @@ APP_NAME = game_of_life
 # If the variable XCC_MAP_FLAGS is set it overrides the flags passed to
 # xcc for the final link (mapping) stage.
 
-XCC_FLAGS = -Wall -O3 -report -DXUD_SERIES_SUPPORT=XUD_X200_SERIES -g -DUSB_TILE=tile[1]
+XCC_FLAGS = -Wall -O3 -report
+#-DXUD_SERIES_SUPPORT=XUD_X200_SERIES -g -DUSB_TILE=tile[0]
 
 # The USED_MODULES variable lists other module used by the application.
-USED_MODULES = lib_i2c lib_usb
+USED_MODULES = lib_i2c
+#lib_usb
 
 #=============================================================================
 # The following part of the Makefile includes the common build infrastructure
