@@ -5,7 +5,10 @@
 #include <xs1.h>
 #include <stdio.h>
 #include "pgmIO.h"
+#include "usb.h"
 #include "i2c.h"
+#include "xud_cdc.h"
+//#include "app_virtual_com_extended.h"
 #include <print.h>
 #include <stdlib.h>
 #include <limits.h>
@@ -35,8 +38,14 @@ on tile[0]: port p_sda = XS1_PORT_1F;
 
 #define TIMER_LIMIT 0x7FFFFFFF
 
-on tile[0] : in port buttons = XS1_PORT_4E; //port to access xCore-200 buttons
-on tile[0] : out port leds = XS1_PORT_4F;   //port to access xCore-200 LEDs
+// I2C interface ports
+on tile[0] : in port p_button = XS1_PORT_4E; //port to access xCore-200 p_button
+on tile[0] : out port p_led = XS1_PORT_4F;   //port to access xCore-200 LEDs
+
+
+/* USB Endpoint Defines */
+#define XUD_EP_COUNT_OUT   2    //Includes EP0 (1 OUT EP0 + 1 BULK OUT EP)
+#define XUD_EP_COUNT_IN    3    //Includes EP0 (1 IN EP0 + 1 INTERRUPT IN EP + 1 BULK IN EP)
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -108,7 +117,7 @@ void buttonListener(in port b, chanend outChan[n], unsigned n, server ButtonInte
           case b_interface[int j].showInterest():
                   enabledChannels[j] = 1;
                   break;
-          case b when pinsneq(15) :> r:    // check if some buttons are pressed
+          case b when pinsneq(15) :> r:    // check if some p_button are pressed
               if ((r==13) || (r==14)) {    // if either button is pressed
                   for(int i=0; i<n; i++) {
                       if (enabledChannels[i]) {
@@ -735,8 +744,6 @@ void accelerometer(client interface i2c_master_if i2c, chanend toDist) {
 /////////////////////////////////////////////////////////////////////////////////////////
 unsafe int main(void) {
 
-  i2c_master_if i2c[1];               //interface to accelerometer
-
 //  char infname[] = "test.pgm";     //put your input image path here
 //  char outfname[] = "testout.pgm"; //put your output image path here
   chan c_inIO, c_outIO, c_control, continueChannel;    //extend your channel definitions here
@@ -746,10 +753,29 @@ unsafe int main(void) {
   interface LEDInterface l_interface[2];
   interface ButtonInterface b_interface[2];
   interface ControlInterface controlInterface;
+
+  /* Channels to communicate with USB endpoints */
+  chan c_ep_out[XUD_EP_COUNT_OUT], c_ep_in[XUD_EP_COUNT_IN];
+  /* Interface to communicate with USB CDC (Virtual Serial) */
+  interface usb_cdc_interface cdc_data;
+  /* I2C interface */
+  i2c_master_if i2c[1];
+
   par {
-      on tile[0]: buttonListener(buttons, c_buttons, 2, b_interface, 2);
-      on tile[0]: showLEDs(leds, l_interface, 2);
-      on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing accelerometer data
+      on USB_TILE: xud(c_ep_out, XUD_EP_COUNT_OUT, c_ep_in, XUD_EP_COUNT_IN,
+                       null, XUD_SPEED_HS, XUD_PWR_SELF);
+
+      on USB_TILE: Endpoint0(c_ep_out[0], c_ep_in[0]);
+
+      on USB_TILE: CdcEndpointsHandler(c_ep_in[1], c_ep_out[1], c_ep_in[2], cdc_data);
+
+//      on tile[0]: app_virtual_com_extended(cdc_data, i2c[0]);
+
+      on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);
+
+      on tile[0]: buttonListener(p_button, c_buttons, 2, b_interface, 2);
+      on tile[0]: showLEDs(p_led, l_interface, 2);
+//      on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);   //server thread providing accelerometer data
       on tile[0]: accelerometer(i2c[0],c_control);        //client thread reading accelerometer data
       on tile[0]: DataInStream("test.pgm", c_inIO);          //thread to read in a PGM image
       on tile[0]: DataOutStream("testout.pgm", c_outIO);       //thread to write out a PGM image

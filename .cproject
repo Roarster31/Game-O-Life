@@ -253,6 +253,24 @@
 									<listOptionValue builtIn="false" value="&quot;${XMOS_TOOL_PATH}\target/include/clang&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${XMOS_TOOL_PATH}/target/include/xc&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${XMOS_TOOL_PATH}/target/include/clang&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/xudlib/glx_support}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/xudlib/included}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_gpio/doc}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_gpio/doc/pdf}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/src/experimental/dfu}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/src}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/xudlib}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/api}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_gpio}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/doc/pdf}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/src/experimental/endpoint0}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_gpio/api}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_gpio/src}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/src/endpoint0}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/src/experimental}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/src/lowlevel}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/doc}&quot;"/>
 								</option>
 								<inputType id="com.xmos.cdt.xc.compiler.input.7457359" name="XC" superClass="com.xmos.cdt.xc.compiler.input"/>
 							</tool>
@@ -579,6 +597,24 @@
 									<listOptionValue builtIn="false" value="&quot;${XMOS_TOOL_PATH}\target/include&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${XMOS_TOOL_PATH}\target/include/clang&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${XMOS_TOOL_PATH}/target/include/clang&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/xudlib/glx_support}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/xudlib/included}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_gpio/doc}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_gpio/doc/pdf}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/src/experimental/dfu}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/src}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/xudlib}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/api}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_gpio}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/doc/pdf}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/src/experimental/endpoint0}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_gpio/api}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_gpio/src}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/src/endpoint0}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/src/experimental}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/src/lowlevel}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/doc}&quot;"/>
 								</option>
 								<inputType id="com.xmos.cdt.c.compiler.input.c.15617764" name="C" superClass="com.xmos.cdt.c.compiler.input.c"/>
 							</tool>
@@ -913,6 +949,24 @@
 									<listOptionValue builtIn="false" value="&quot;${XMOS_TOOL_PATH}\target/include/c++/v1&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${XMOS_TOOL_PATH}/target/include/clang&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${XMOS_TOOL_PATH}/target/include/c++/v1&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/xudlib/glx_support}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/xudlib/included}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_gpio/doc}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_gpio/doc/pdf}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/src/experimental/dfu}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/src}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/xudlib}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/api}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_gpio}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/doc/pdf}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/src/experimental/endpoint0}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_gpio/api}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_gpio/src}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/src/endpoint0}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/src/experimental}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/src/lowlevel}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/lib_usb/doc}&quot;"/>
 								</option>
 								<inputType id="com.xmos.cdt.cxx.compiler.input.cpp.35779587" name="C++" superClass="com.xmos.cdt.cxx.compiler.input.cpp"/>
 							</tool>
