@@ -14,8 +14,8 @@
 #include <stdlib.h>
 #include <limits.h>
 
-#define  IMHT 16                  //image height
-#define  IMWD 16                  //image width
+#define  IMHT 64                  //image height
+#define  IMWD 64                  //image width
 
 #define  WORKER_THREADS 3
 
@@ -49,6 +49,13 @@ on tile[0]: port p_button = XS1_PORT_4E;
 /* USB Endpoint Defines */
 #define XUD_EP_COUNT_OUT   2    //Includes EP0 (1 OUT EP0 + 1 BULK OUT EP)
 #define XUD_EP_COUNT_IN    3    //Includes EP0 (1 IN EP0 + 1 INTERRUPT IN EP + 1 BULK IN EP)
+
+#define MENU_MAX_CHARS  30
+
+char welcomeMessage[2][MENU_MAX_CHARS] = {
+
+        {"Welcome, to your death"}
+};
 
 /////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -288,9 +295,11 @@ typedef interface ControlInterface {
     void startTiming();
 } ControlInterface;
 
-unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterface buttonInterface, server ControlInterface controlInterface, client LEDInterface l_interface,  chanend fromAcc, chanend continueChannel) {
+unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterface buttonInterface, server ControlInterface controlInterface, client LEDInterface l_interface,  chanend fromAcc, chanend continueChannel, client interface usb_cdc_interface cdc) {
   int exporting = 0;
   int paused = 0;
+  unsigned length;
+
 
 
   BoundingBox currentBoundingBox;
@@ -333,7 +342,44 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
               currentLiveCells = liveCells;
               break;
           case controlInterface.setOutputArrayPointer(uchar * unsafe outputArrayPointer):
-                currentDataPointer = outputArrayPointer;
+              currentDataPointer = outputArrayPointer;
+              char row[IMWD];
+              for(int i=0; i<IMWD; i++) {
+                  row[i] = 32;
+              }
+              char newline[4] = {"\r\n"};
+              length = 4;
+
+//              for (int i=0; i<IMHT; i++) {
+//                  cdc.write(newline, length);
+//              }
+
+              cdc.put_char(27);
+              char code[3] = {"[2J"};
+              length = 3;
+              cdc.write(code, length); // clear screen
+              cdc.put_char(27); // ESC
+              char code2[2] = {"[H"};
+              length = 2;
+              cdc.write(code2, length); // cursor to home
+
+              for( int y = 0; y < IMHT; y++ ) {   //go through all lines
+//                  printf("row: ");
+                   for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
+                       int baseItem = getItem(currentDataPointer, x, y);
+                       uchar value = baseItem == 0 ? '0' : '1';
+                       row[x] = value;
+//                       printf("%c", value);
+                   }
+//                   printf("\n");
+                   length = IMWD;
+                   cdc.write(row, length);
+                   length = 4;
+                   cdc.write(newline, length);
+              }
+
+//              printf("sending over usb\n");
+
                 break;
           case fromButton :> int buttonType:
               if(buttonType == SW2_CODE && !exporting) {
@@ -811,15 +857,15 @@ unsafe int main(void) {
 
 
       on USB_TILE: DataOutStream("testout.pgm", c_outIO);       //thread to write out a PGM image
-      on USB_TILE: DataInStream("test.pgm", c_inIO);          //thread to read in a PGM image
+      on USB_TILE: DataInStream("64x64.pgm", c_inIO);          //thread to read in a PGM image
       on tile[0]: buttonListener(p_button, c_buttons, 2, b_interface, 2);
       on tile[0]: showLEDs(p_led, l_interface, 2);
 
 
-      on USB_TILE: app_virtual_com_extended(cdc_data);
+//      on USB_TILE: app_virtual_com_extended(cdc_data);
       on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);
       on tile[0]: accelerometer(i2c[0],c_control);        //client thread reading accelerometer data
-      on tile[0]: controlServer(c_outIO, c_buttons[0], b_interface[0], controlInterface, l_interface[0], c_control, continueChannel);
+      on tile[0]: controlServer(c_outIO, c_buttons[0], b_interface[0], controlInterface, l_interface[0], c_control, continueChannel, cdc_data);
       on tile[0]: distributor(c_inIO, c_buttons[1], b_interface[1], l_interface[1], controlInterface, continueChannel);//thread to coordinate work on image
   }
 
