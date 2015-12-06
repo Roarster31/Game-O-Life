@@ -1,6 +1,3 @@
-// COMS20001 - Cellular Automaton Farm - Initial Code Skeleton
-// (using the XMOS i2c accelerometer demo)
-
 #include <platform.h>
 #include <xs1.h>
 #include "usb.h"
@@ -14,30 +11,24 @@
 #include <stdlib.h>
 #include <limits.h>
 
-#define  IMHT 256                  //image height
-#define  IMWD 256                  //image width
+#define  IMHT 16
+#define  IMWD 16
 
 #define  WORKER_THREADS 3
 
-typedef unsigned char uchar;      //using uchar as shorthand
+typedef unsigned char uchar;
 
-on tile[0]: port p_scl = XS1_PORT_1E;         //interface ports to accelerometer
+on tile[0]: port p_scl = XS1_PORT_1E;
 on tile[0]: port p_sda = XS1_PORT_1F;
 
-#define FXOS8700EQ_I2C_ADDR 0x1E  //register addresses for accelerometer
+#define FXOS8700EQ_I2C_ADDR 0x1E
 #define FXOS8700EQ_XYZ_DATA_CFG_REG 0x0E
 #define FXOS8700EQ_CTRL_REG_1 0x2A
 #define FXOS8700EQ_DR_STATUS 0x0
 #define FXOS8700EQ_OUT_X_MSB 0x1
-#define FXOS8700EQ_OUT_X_LSB 0x2
-#define FXOS8700EQ_OUT_Y_MSB 0x3
-#define FXOS8700EQ_OUT_Y_LSB 0x4
-#define FXOS8700EQ_OUT_Z_MSB 0x5
-#define FXOS8700EQ_OUT_Z_LSB 0x6
+
 #define SW1_CODE 0xE
 #define SW2_CODE 0xD
-
-#define TIMER_LIMIT 0xFFFFFFFE
 
 /* PORT_4A connected to the 4 LEDs */
 on tile[0]: port p_led = XS1_PORT_4F;
@@ -45,26 +36,21 @@ on tile[0]: port p_led = XS1_PORT_4F;
 /* PORT_4C connected to the 2 Buttons */
 on tile[0]: port p_button = XS1_PORT_4E;
 
-
 /* USB Endpoint Defines */
 #define XUD_EP_COUNT_OUT   2    //Includes EP0 (1 OUT EP0 + 1 BULK OUT EP)
 #define XUD_EP_COUNT_IN    3    //Includes EP0 (1 IN EP0 + 1 INTERRUPT IN EP + 1 BULK IN EP)
 
-#define MENU_MAX_CHARS  30
+/* terminal command codes */
+char CLEAR_SCREEN_CODE[4] = {"[2J"};
+unsigned CLEAR_SCREEN_CODE_LENGTH = 4;
 
-
-//todo I dont even know what to do with this.... except tell Death, "not today" :)
-char welcomeMessage[2][MENU_MAX_CHARS] = {
-
-        {"Welcome, to your death"}
-};
-
-char CLEAR_SCREEN_CODE[3] = {"[2J"};
-
-char HOME_CURSOR_CODE[2] = {"[H"};
+char HOME_CURSOR_CODE[3] = {"[H"};
+unsigned HOME_CURSOR_CODE_LENGTH = 3;
 
 char NEW_LINE_CODE[4] = {"\r\n"};
 unsigned NEW_LINE_LENGTH = 4;
+
+/*helper functions */
 
 int min(int num1, int num2) {
     return num1 < num2 ? num1 : num2;
@@ -74,32 +60,38 @@ int max(int num1, int num2) {
     return num1 > num2 ? num1 : num2;
 }
 
-
+/**
+ * Sends a series of commands across a serial connection to clear the
+ * screen connected to the serial port.
+ **/
 void clearScreen(client interface usb_cdc_interface cdc) {
-    unsigned length = 4;
-    cdc.write(NEW_LINE_CODE, NEW_LINE_LENGTH);
-    cdc.put_char(27);
 
-    length = 2;
-    cdc.write(CLEAR_SCREEN_CODE, length); // clear screen
+    cdc.put_char(27); // ESC command
 
-    cdc.put_char(27); // ESC
+    cdc.write(CLEAR_SCREEN_CODE, CLEAR_SCREEN_CODE_LENGTH); // clear screen
 
-    length = 2;
-    cdc.write(HOME_CURSOR_CODE, length); // cursor to home
+    cdc.put_char(27); // ESC command
+
+    cdc.write(HOME_CURSOR_CODE, HOME_CURSOR_CODE_LENGTH); // set cursor to the beginning again
 }
 
 typedef interface LEDInterface {
-  void setSeparate(int enabled);
-  void setColour(int currentRed, int currentGreen, int currentBlue);
+  void setSeparate(int enabled); //set the seperate LED on or off
+  void setColour(int currentRed, int currentGreen, int currentBlue); //set the values of the red, green and blue LEDs
 } LEDInterface;
 
-//DISPLAYS an LED pattern
+/**
+ * Sets the LEDs using the given values
+ */
+void setLEDPattern(out port p, int seperateEn, int red, int green, int blue) {
+    //1st bit: separate, 2nd bit: blue, 3rd bit: green, 4th bit: red
+    p <: (seperateEn ) | (blue * 2) | (green * 4) | (red * 8);
+}
+
+/**
+ * Controls the LEDs through the LEDInterface
+ */
 int showLEDs(out port p, server LEDInterface l_interface[n], unsigned n) {
-  int pattern; //1st bit...separate green LED
-               //2nd bit...blue LED
-               //3rd bit...green LED
-               //4th bit...red LED
 
   int separateEnabled = 0;
   int currentRed = 0;
@@ -111,27 +103,29 @@ int showLEDs(out port p, server LEDInterface l_interface[n], unsigned n) {
       select{
           case l_interface[int j].setSeparate(int enabled):
                   separateEnabled = enabled;
+                  setLEDPattern(p, separateEnabled, currentRed, currentGreen, currentBlue);
               break;
           case l_interface[int j].setColour(int red, int green, int blue):
                   currentRed = red;
                   currentGreen = green;
                   currentBlue = blue;
+                  setLEDPattern(p, separateEnabled, currentRed, currentGreen, currentBlue);
               break;
       }
 
-    pattern = (separateEnabled ) | (currentBlue * 2) | (currentGreen * 4) | (currentRed * 8);
-    p <: pattern;        //send pattern to LED port
   }
   return 0;
 }
 
 typedef interface ButtonInterface {
-  void showInterest();
+  void showInterest(); //used to indicate that a channel is waiting for a button click
 } ButtonInterface;
 
-
-void buttonListener(in port b, chanend outChan[n], unsigned n, server ButtonInterface b_interface[m], unsigned m) {
-  int r;
+/**
+ * Listens for button clicks and calls any channels that have registered interest.
+ */
+void buttonListener(in port button_port, chanend outChan[n], server ButtonInterface b_interface[n], unsigned n) {
+  int button_val;
   int enabledChannels[2];
   for(int i=0; i<n; i++) {
       enabledChannels[i] = 0;
@@ -143,11 +137,12 @@ void buttonListener(in port b, chanend outChan[n], unsigned n, server ButtonInte
           case b_interface[int j].showInterest():
                   enabledChannels[j] = 1;
                   break;
-          case b when pinsneq(15) :> r:    // check if some p_button are pressed
-              if ((r==13) || (r==14)) {    // if either button is pressed
+          case button_port when pinsneq(15) :> button_val:
+              if ((button_val==13) || (button_val==14)) {
                   for(int i=0; i<n; i++) {
+                      //let all interested channels know
                       if (enabledChannels[i]) {
-                          outChan[i] <: r;             // send button pattern to outChan
+                          outChan[i] <: button_val;
                           enabledChannels[i] = 0;
                       }
                   }
@@ -158,7 +153,9 @@ void buttonListener(in port b, chanend outChan[n], unsigned n, server ButtonInte
   }
 }
 
-
+/**
+ * Reads in a pgm file to c_out
+ */
 void DataInStream(char infname[], chanend c_out) {
   int res;
   uchar line[ IMWD ];
@@ -185,7 +182,9 @@ void DataInStream(char infname[], chanend c_out) {
   return;
 }
 
-
+/**
+ * Converts from PGM uchars to our internal integer representation
+ */
 int decode(uchar input) {
     //convert from pgm to pbm
     unsigned int intermediary;
@@ -198,6 +197,9 @@ int decode(uchar input) {
     return intermediary;
 }
 
+/**
+ * Converts from our internal integer representation to PGM uchars
+ */
 uchar encode(int intermediary) {
     uchar output;
     if(intermediary == 0) {
@@ -208,8 +210,11 @@ uchar encode(int intermediary) {
     return output;
 }
 
-
-unsafe int getItem(uchar * unsafe inArray, int x, int y) {
+/**
+ * Ensures that the coordinate pair is within the image's bounds.
+ * If not, it updates the pair to wrap around.
+ */
+void ensureBoundedCoordinates(int &x, int &y) {
     while (x < 0) {
         x += IMWD;
     }
@@ -222,6 +227,13 @@ unsafe int getItem(uchar * unsafe inArray, int x, int y) {
     while (y >= IMHT) {
         y -= IMHT;
     }
+}
+
+/**
+ * Returns the value at the given coordinates in the internal array representation of the image.
+ */
+unsafe int getItem(uchar * unsafe inArray, int x, int y) {
+    ensureBoundedCoordinates(x, y);
 
     int elementIndex = y * IMWD + x;
     int ucharIndex = (elementIndex / 8) + 1;
@@ -230,20 +242,11 @@ unsafe int getItem(uchar * unsafe inArray, int x, int y) {
     return (inArray[ucharIndex] >> indexInUchar) & 1;
 }
 
-
+/**
+ * Returns the value at the given coordinates in the internal array representation of the image.
+ */
 unsafe void setItem(uchar * unsafe inArray, int x, int y, int value) {
-    while (x < 0) {
-        x += IMWD;
-    }
-    while (x >= IMWD) {
-        x -= IMWD;
-    }
-    while (y < 0) {
-        y += IMHT;
-    }
-    while (y >= IMHT) {
-        y -= IMHT;
-    }
+    ensureBoundedCoordinates(x, y);
 
     int elementIndex = y * IMWD + x;
     int ucharIndex = (elementIndex / 8) + 1;
@@ -414,6 +417,7 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
               //usb drawing section
               if (!paused && thisTime > framePeriodInc && pointerSet) {
                     framePeriodInc += framePeriod;
+                    cdc.write(NEW_LINE_CODE, NEW_LINE_LENGTH);
                     clearScreen(cdc);
                     for( int y = 0; y < IMHT; y++ ) {
                          for( int x = 0; x < IMWD; x++ ) {
@@ -612,11 +616,11 @@ unsafe void distributor(chanend c_in, chanend fromButton, client ButtonInterface
 
   //wait for SW1 to be pressed
   int buttonData = 0;
-//
-//  buttonInterface.showInterest();
-//  while (buttonData != SW1_CODE) {
-//      fromButton :> buttonData;
-//  }
+
+  buttonInterface.showInterest();
+  while (buttonData != SW1_CODE) {
+      fromButton :> buttonData;
+  }
 
   l_interface.setColour(0,1,0);
 
@@ -634,15 +638,20 @@ unsafe void distributor(chanend c_in, chanend fromButton, client ButtonInterface
   for( int y = 0; y < IMHT; y++ ) {   //go through all lines
     for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
       c_in :> val;
+
       decoded = decode(val);
+
       if(decoded) {
           boundingBox.left = min(x, boundingBox.left);
           boundingBox.right = max(x, boundingBox.right);
           boundingBox.top = min(y, boundingBox.top);
           boundingBox.bottom = max(y, boundingBox.bottom);
       }
+
       setItem(outArray, x, y, 0);
+
       setItem(inArray, x, y, decoded); //reads in intermediate
+
     }
   }
   controlInterface.startTiming();
@@ -767,9 +776,9 @@ unsafe int main(void) {
       on USB_TILE: Endpoint0(c_ep_out[0], c_ep_in[0]);
       on USB_TILE: CdcEndpointsHandler(c_ep_in[1], c_ep_out[1], c_ep_in[2], cdc_data);
       on USB_TILE: DataOutStream("testout.pgm", c_outIO);       //thread to write out a PGM image
-      on USB_TILE: DataInStream("256x256.pgm", c_inIO);          //thread to read in a PGM image
+      on USB_TILE: DataInStream("test.pgm", c_inIO);          //thread to read in a PGM image
 
-      on tile[0]: buttonListener(p_button, c_buttons, 2, b_interface, 2);
+      on tile[0]: buttonListener(p_button, c_buttons, b_interface, 2);
       on tile[0]: showLEDs(p_led, l_interface, 2);
       on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);
       on tile[0]: accelerometer(i2c[0],c_control);        //client thread reading accelerometer data
