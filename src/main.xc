@@ -3,7 +3,6 @@
 #include "usb.h"
 #include "i2c.h"
 #include "xud_cdc.h"
-#include "app_virtual_com_extended.h"
 
 #include <stdio.h>
 #include "pgmIO.h"
@@ -57,6 +56,9 @@ unsigned EXPORT_START_MSG_LENGTH = 13;
 char EXPORT_END_MSG[16] = {"export finished"};
 unsigned EXPORT_END_MSG_LENGTH = 16;
 
+char DATA_NOT_READ_ERMSG[49] = {"You must read in data before using any commands!"};
+unsigned DATA_NOT_READ_ERMSG_LENGTH = 49;
+
 char EXIT_SCREEN_MSG[20] = {"Press 'e' to exit"};
 unsigned EXIT_SCREEN_MSG_LENGTH = 20;
 
@@ -80,7 +82,7 @@ char report4[150];
 char report5[150];
 
 
-static unsigned QUICK_START_FLAG = 1;
+static unsigned QUICK_START_FLAG = 0;
 
 /*helper functions */
 
@@ -345,34 +347,6 @@ unsafe int makeDecision(uchar * unsafe arr, int startX, int startY) {
     return live;
 }
 
-//typedef interface SerialInterface {
-//    void writeString(uchar * str, unsigned n);
-//    void writeChar(uchar c);
-//} SerialInterface;
-//
-//unsafe void serialServer(client interface usb_cdc_interface cdc, server interface SerialInterface serialInterface) {
-//    while (1) {
-//        if(cdc.available_bytes()) {
-//            switch (cdc.get_char()) {
-//                default:
-//                    //we've received a message
-//                    break;
-//            }
-//        }
-//        select {
-//            case serialInterface.writeString(uchar * str, unsigned n):
-//                uchar * strOut;
-//                safememcpy(strOut, str, 8*n);
-//                cdc.write(strOut, n);
-//                break;
-//            case serialInterface.writeChar(uchar c):
-//                cdc.put_char(c);
-//                break;
-//
-//        }
-//    }
-//}
-
 /**
  * Sends a series of commands across a serial connection to clear the
  * screen connected to the serial port.
@@ -479,10 +453,12 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
               pointerSet = 1;
                 break;
           case fromButton :> int buttonType:
-              if(buttonType == SW2_CODE && !exporting) {
+              if(buttonType == SW2_CODE && !exporting && pointerSet) {
                   exporting = 1;
                   exportImage(c_out, currentDataPointer, l_interface);
                   exporting = 0;
+              } else if(buttonType == SW2_CODE && !pointerSet) {
+                  printf("Can't export before data is read in!\n");
               }
               //re-register interest
               buttonInterface.showInterest();
@@ -573,31 +549,39 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
       }
       if(cdc.available_bytes()) {
           uchar charValue = cdc.get_char();
-          switch (charValue) {
+          if(pointerSet) {
+              switch (charValue) {
 
-          case 'i': //i(mage)
-              serialState = 2;
-              break;
-          case 'r': //r(eport)
-              serialState = 3;
-              break;
-          case 's': //s(ave)
-              if(!exporting) {
-                  exporting = 1;
-                  cdc.write(EXPORT_START_MSG, EXPORT_START_MSG_LENGTH);
-                  exportImage(c_out, currentDataPointer, l_interface);
-                  cdc.write(EXPORT_END_MSG, EXPORT_END_MSG_LENGTH);
-                  exporting = 0;
+              case 'i': //i(mage)
+                  serialState = 2;
+                  break;
+              case 'r': //r(eport)
+                  serialState = 3;
+                  break;
+              case 's': //s(ave)
+                  if(!exporting && pointerSet) {
+                      exporting = 1;
+                      cdc.write(EXPORT_START_MSG, EXPORT_START_MSG_LENGTH);
+                      exportImage(c_out, currentDataPointer, l_interface);
+                      cdc.write(EXPORT_END_MSG, EXPORT_END_MSG_LENGTH);
+                      exporting = 0;
+                  }
+                  break;
+              case 'e': //e(xit)
+              default:
+                  serialState = 1;
+                  clearScreen(cdc);
+                  for(int i = 0; i < SERIAL_MENU_ROWS; i++) {
+                      cdc.write(SERIAL_MENU[i], SERIAL_MENU_LENGTH);
+                  }
+                  break;
               }
-              break;
-          case 'e': //e(xit)
-          default:
-              serialState = 1;
+          } else {
               clearScreen(cdc);
               for(int i = 0; i < SERIAL_MENU_ROWS; i++) {
                   cdc.write(SERIAL_MENU[i], SERIAL_MENU_LENGTH);
               }
-              break;
+              cdc.write(DATA_NOT_READ_ERMSG, DATA_NOT_READ_ERMSG_LENGTH);
           }
       }
   }
@@ -787,8 +771,8 @@ unsafe void distributor(chanend c_in, chanend fromButton, client ButtonInterface
   int buttonData = 0;
 
   if(!QUICK_START_FLAG) {
-      buttonInterface.showInterest();
       while (buttonData != SW1_CODE) {
+          buttonInterface.showInterest();
           fromButton :> buttonData;
       }
   }
