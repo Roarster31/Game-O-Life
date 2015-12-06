@@ -386,7 +386,6 @@ unsafe void exportImage(chanend c_out, uchar * unsafe currentDataPointer, client
 typedef interface ControlInterface {
     void updateState(BoundingBox boundingBox, int currentRound, int liveCells); //update the current game state
     unsigned int getElapsedTime(); //return the total current elapsed time in milliseconds
-    int isPaused(); //determine whether or not the game is currently paused
     void setOutputArrayPointer(uchar * unsafe outputArrayPointer); //set the pointer to last processed round
     void startTiming(); //call to begin timing. This should be called after the file has been read in
 } ControlInterface;
@@ -440,9 +439,6 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
               unsigned int currentTime = 1000 * 42 * totalClockCycles + deciCounter * 100;
               elapsed = currentTime - startTime - totalLostTime;
               break;
-          case controlInterface.isPaused() -> int returnVal:
-              returnVal = paused;
-              break;
           case controlInterface.updateState(BoundingBox boundingBox, int round, int liveCells):
               currentBoundingBox = boundingBox;
               currentRound = round;
@@ -464,24 +460,26 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
               buttonInterface.showInterest();
               break;
           case fromAcc :> paused:
-              if (paused) {
-                  pauseStartTime = 1000 * 42 * totalClockCycles + deciCounter * 100;
-                  unsigned int elapsedTime =  pauseStartTime - startTime - totalLostTime;
-                  printf("----Paused----\n");
-                  printf("Round = %d\n", currentRound);
-                  printf("Total live cells = %d\n", currentLiveCells);
-                  int boundingPixels = (currentBoundingBox.right - currentBoundingBox.left + 3) * (currentBoundingBox.bottom - currentBoundingBox.top + 3);
-                  int totalPixels = IMWD * IMHT;
-                  printf("Bounding box between points (%d,%d) and (%d,%d) means we're only processing %d out of %d pixels\n",currentBoundingBox.left, currentBoundingBox.top, currentBoundingBox.right, currentBoundingBox.bottom, boundingPixels, totalPixels);
-                  printf("Total processing time: %d ms\n", elapsedTime);
-                  printf("Total Processing throughput after %d rounds is %u ms per round.\n",currentRound, elapsedTime/currentRound);
-                  l_interface.setColour(1, 0, 0);
-              } else {
-                  printf("resuming...\n");
-                  l_interface.setColour(0, 0, 0);
+              if(pointerSet) {
+                  if (paused) {
+                      pauseStartTime = 1000 * 42 * totalClockCycles + deciCounter * 100;
+                      unsigned int elapsedTime =  pauseStartTime - startTime - totalLostTime;
+                      printf("----Paused----\n");
+                      printf("Round = %d\n", currentRound);
+                      printf("Total live cells = %d\n", currentLiveCells);
+                      int boundingPixels = (currentBoundingBox.right - currentBoundingBox.left + 3) * (currentBoundingBox.bottom - currentBoundingBox.top + 3);
+                      int totalPixels = IMWD * IMHT;
+                      printf("Bounding box between points (%d,%d) and (%d,%d) means we're only processing %d out of %d pixels\n",currentBoundingBox.left, currentBoundingBox.top, currentBoundingBox.right, currentBoundingBox.bottom, boundingPixels, totalPixels);
+                      printf("Total processing time: %d ms\n", elapsedTime);
+                      printf("Total Processing throughput after %d rounds is %u ms per round.\n",currentRound, elapsedTime/currentRound);
+                      l_interface.setColour(1, 0, 0);
+                  } else {
+                      printf("resuming...\n");
+                      l_interface.setColour(0, 0, 0);
 
-                  unsigned int endTime = 1000 * 42 * totalClockCycles + deciCounter * 100;
-                  totalLostTime += endTime - pauseStartTime;
+                      unsigned int endTime = 1000 * 42 * totalClockCycles + deciCounter * 100;
+                      totalLostTime += endTime - pauseStartTime;
+                  }
               }
               break;
           case !paused && !exporting => continueChannel :> int data:
