@@ -14,7 +14,7 @@
 #define  IMHT 16
 #define  IMWD 16
 
-#define  WORKER_THREADS 3
+#define  WORKER_THREADS 4
 
 typedef unsigned char uchar;
 
@@ -40,7 +40,7 @@ on tile[0]: port p_button = XS1_PORT_4E;
 #define XUD_EP_COUNT_OUT   2    //Includes EP0 (1 OUT EP0 + 1 BULK OUT EP)
 #define XUD_EP_COUNT_IN    3    //Includes EP0 (1 IN EP0 + 1 INTERRUPT IN EP + 1 BULK IN EP)
 
-/* terminal command codes */
+/* serial command codes and strings */
 char CLEAR_SCREEN_CODE[4] = {"[2J"};
 unsigned CLEAR_SCREEN_CODE_LENGTH = 4;
 
@@ -75,13 +75,15 @@ char SERIAL_MENU[7][50] = {
 unsigned SERIAL_MENU_LENGTH = 50;
 unsigned SERIAL_MENU_ROWS = 7;
 
-char report1[150];
-char report2[150];
-char report3[150];
-char report4[150];
-char report5[150];
+char SERIAL_REPORT_ROUND_ARR[150];
+char SERIAL_REPORT_LIVE_CELLS_ARR[150];
+char SERIAL_REPORT_BOUNDING_BOX_ARR[150];
+char SERIAL_REPORT_PROCESSING_TIME_ARR[150];
+char SERIAL_REPORT_PROCESSING_THROUGHPUT_ARR[150];
 
+unsigned SERIAL_REPORT_LENGTH = 150;
 
+//whether to skip the initial button press when loading image
 static unsigned QUICK_START_FLAG = 0;
 
 /*helper functions */
@@ -180,12 +182,11 @@ void buttonListener(in port button_port, chanend outChan[n], server ButtonInterf
 }
 
 /**
- * Reads in a pgm file to c_out
+ * Reads in a pgm file and then waits to write out a PGM file
  */
 void DataManager(char infname[], char outfname[], chanend c_in, chanend c_out) {
   int res;
   uchar line[ IMWD ];
-  printf( "DataInStream: Start...\n" );
 
   //Open PGM file
   res = _openinpgm( infname, IMWD, IMHT );
@@ -209,7 +210,6 @@ void DataManager(char infname[], char outfname[], chanend c_in, chanend c_out) {
 
   //Close PGM image file
   _closeinpgm();
-  printf( "DataInStream:Done...\n" );
 
   //now prepare to write out
 
@@ -217,10 +217,10 @@ void DataManager(char infname[], char outfname[], chanend c_in, chanend c_out) {
       c_in :> line[0];
 
       //Open PGM file
-      printf( "DataOutStream:Start...\n" );
+      printf( "Beginning file write\n" );
       res = _openoutpgm( outfname, IMWD, IMHT );
       if( res ) {
-          printf( "DataOutStream:Error opening %s\n.", outfname );
+          printf( "Error opening %s\n.", outfname );
           return;
       }
 
@@ -234,7 +234,7 @@ void DataManager(char infname[], char outfname[], chanend c_in, chanend c_out) {
 
       //Close the PGM image
       _closeoutpgm();
-      printf( "DataOutStream:Done...\n" );
+      printf( "Finished file write\n" );
   }
   return;
 }
@@ -362,6 +362,9 @@ void clearScreen(client interface usb_cdc_interface cdc) {
     cdc.write(HOME_CURSOR_CODE, HOME_CURSOR_CODE_LENGTH); // set cursor to the beginning again
 }
 
+/**
+ * Export an image described by currentDataPointer
+ */
 unsafe void exportImage(chanend c_out, uchar * unsafe currentDataPointer, client LEDInterface l_interface) {
     printf("Received export request\n");
 
@@ -390,7 +393,9 @@ typedef interface ControlInterface {
     void startTiming(); //call to begin timing. This should be called after the file has been read in
 } ControlInterface;
 
-
+/**
+ * Acts as a middleman between many of the interfaces and the init.
+ */
 unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterface buttonInterface, server ControlInterface controlInterface, client LEDInterface l_interface,  chanend fromAcc, chanend continueChannel, client interface usb_cdc_interface cdc) {
   int exporting = 0;
   int paused = 0;
@@ -410,8 +415,6 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
   unsigned int pauseStartTime;
   unsigned int totalLostTime = 0;
   int totalClockCycles = 0;
-
-
 
   unsigned period = 10000000;
   unsigned periodInc = period;
@@ -482,6 +485,7 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
                   }
               }
               break;
+              //if we're not paused or exporting then any calls to continueChannel should go through
           case !paused && !exporting => continueChannel :> int data:
               break;
           case time when timerafter(periodInc) :> unsigned thisTime:
@@ -514,42 +518,39 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
 
                       cdc.write(EXIT_SCREEN_MSG, EXIT_SCREEN_MSG_LENGTH);
                       break;
-                  case 3: //live status
+                  case 3: //live report
                       clearScreen(cdc);
-                      unsigned maxLength = 150;
-
 
                       unsigned pauseStartTime = 1000 * 42 * totalClockCycles + deciCounter * 100;
                       unsigned int elapsedTime =  pauseStartTime - startTime - totalLostTime;
                       int boundingPixels = (currentBoundingBox.right - currentBoundingBox.left + 3) * (currentBoundingBox.bottom - currentBoundingBox.top + 3);
                       int totalPixels = IMWD * IMHT;
 
-                      sprintf(report1, "Round = %d\r\n", currentRound);
-                      cdc.write(report1, maxLength);
-                      sprintf(report2, "Total live cells = %d\r\n", currentLiveCells);
-                      cdc.write(report2, maxLength);
-                      sprintf(report3, "Bounding box between points (%d,%d) and (%d,%d) means we're only processing %d out of %d pixels\r\n",currentBoundingBox.left, currentBoundingBox.top, currentBoundingBox.right, currentBoundingBox.bottom, boundingPixels, totalPixels);
-                      cdc.write(report3, maxLength);
-                      sprintf(report4, "Total processing time: %d ms\r\n", elapsedTime);
-                      cdc.write(report4, maxLength);
-                      sprintf(report5, "Total Processing throughput after %d rounds is %u ms per round.\r\n",currentRound, elapsedTime/currentRound);
-                      cdc.write(report5, maxLength);
+                      sprintf(SERIAL_REPORT_ROUND_ARR, "Round = %d\r\n", currentRound);
+                      cdc.write(SERIAL_REPORT_ROUND_ARR, SERIAL_REPORT_LENGTH);
+                      sprintf(SERIAL_REPORT_LIVE_CELLS_ARR, "Total live cells = %d\r\n", currentLiveCells);
+                      cdc.write(SERIAL_REPORT_LIVE_CELLS_ARR, SERIAL_REPORT_LENGTH);
+                      sprintf(SERIAL_REPORT_BOUNDING_BOX_ARR, "Bounding box between points (%d,%d) and (%d,%d) means we're only processing %d out of %d pixels\r\n",currentBoundingBox.left, currentBoundingBox.top, currentBoundingBox.right, currentBoundingBox.bottom, boundingPixels, totalPixels);
+                      cdc.write(SERIAL_REPORT_BOUNDING_BOX_ARR, SERIAL_REPORT_LENGTH);
+                      sprintf(SERIAL_REPORT_PROCESSING_TIME_ARR, "Total processing time: %d ms\r\n", elapsedTime);
+                      cdc.write(SERIAL_REPORT_PROCESSING_TIME_ARR, SERIAL_REPORT_LENGTH);
+                      sprintf(SERIAL_REPORT_PROCESSING_THROUGHPUT_ARR, "Total Processing throughput after %d rounds is %u ms per round.\r\n",currentRound, elapsedTime/currentRound);
+                      cdc.write(SERIAL_REPORT_PROCESSING_THROUGHPUT_ARR, SERIAL_REPORT_LENGTH);
 
                       cdc.write(EXIT_SCREEN_MSG, EXIT_SCREEN_MSG_LENGTH);
                       break;
 
                   }
 
-
-
               }
               break;
       }
+
+      //receive any messages we get from the serial port
       if(cdc.available_bytes()) {
           uchar charValue = cdc.get_char();
           if(pointerSet) {
               switch (charValue) {
-
               case 'i': //i(mage)
                   serialState = 2;
                   break;
@@ -586,7 +587,7 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
 }
 
 
-unsafe void workerThing(chanend distribChannel) {
+unsafe void worker(chanend distribChannel) {
     uchar * unsafe inArrayPointer;
     uchar * unsafe outArrayPointer;
     int startX = 0;
@@ -632,10 +633,10 @@ unsafe void workerThing(chanend distribChannel) {
     }
 }
 
-
-
-
-unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outArrayPointer, chanend workerChannels[n], unsigned n, client ControlInterface controlInterface, client LEDInterface l_interface, chanend continueChannel, BoundingBox boundingBox) {
+/**
+ * Loops through rounds and distributes work to workers until there are no live cells left.
+ */
+unsafe void distributionLoop(uchar * unsafe inArrayPointer, uchar * unsafe outArrayPointer, chanend workerChannels[n], unsigned n, client ControlInterface controlInterface, client LEDInterface l_interface, chanend continueChannel, BoundingBox boundingBox) {
 
   int roundNumber = 0;
   BoundingBox roundBoundingBox = boundingBox;
@@ -660,11 +661,16 @@ unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outA
 
       int freeWorkers = n;
       int row = 0;
+
+      //work out a bounding box slightly larger than last round's bounding box (because interactions
+      //will take place with cells 1 outside box)
       int top = roundBoundingBox.bottom == (IMHT-1) ? 0 : max(0, roundBoundingBox.top-1);
       int bottom = roundBoundingBox.top == 0 ? IMHT : min(IMHT, roundBoundingBox.bottom+1);
       int left = roundBoundingBox.right == (IMWD-1) ? 0 : max(0, roundBoundingBox.left-1);
       int right = roundBoundingBox.left == 0 ? IMWD : min(IMWD, roundBoundingBox.right+1);
 
+      //send the initial work off until we've either completed all rows
+      //or run out of workers.
       while(completed < IMHT && freeWorkers > 0 && row < IMHT) {
           if (row >= top && row <= bottom) {
 
@@ -712,6 +718,8 @@ unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outA
                   top = min(top, tempBoundingBox.top);
                   bottom = max(bottom, tempBoundingBox.bottom);
               }
+
+              //see if we have to pause
               continueChannel <: 0;
 
               if(row < IMHT) {
@@ -736,7 +744,7 @@ unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outA
           }
       }
 
-
+      //see if we have to pause (specifically due to exporting at this point)
       continueChannel <: 0;
 
       uchar * unsafe swap = inArrayPointer;
@@ -758,7 +766,7 @@ unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outA
 }
 
 
-unsafe void distributor(chanend c_in, chanend fromButton, client ButtonInterface buttonInterface, client LEDInterface l_interface, client ControlInterface controlInterface, chanend continueChannel) {
+unsafe void init(chanend c_in, chanend fromButton, client ButtonInterface buttonInterface, client LEDInterface l_interface, client ControlInterface controlInterface, chanend continueChannel) {
   uchar val;
 
   //Starting up and wait for tilting of the xCore-200 Explorer
@@ -801,9 +809,9 @@ unsafe void distributor(chanend c_in, chanend fromButton, client ButtonInterface
           boundingBox.bottom = max(y, boundingBox.bottom);
       }
 
+      //set the out array to all zeros for our sanity
       setItem(outArray, x, y, 0);
-
-      setItem(inArray, x, y, decoded); //reads in intermediate
+      setItem(inArray, x, y, decoded);
 
     }
   }
@@ -817,10 +825,10 @@ unsafe void distributor(chanend c_in, chanend fromButton, client ButtonInterface
   chan workerChannels[WORKER_THREADS];
 
   par {
-        distributorServer(inArrayPointer, outArrayPointer, workerChannels, WORKER_THREADS, controlInterface, l_interface, continueChannel, boundingBox);
+        distributionLoop(inArrayPointer, outArrayPointer, workerChannels, WORKER_THREADS, controlInterface, l_interface, continueChannel, boundingBox);
         {
             par (int i=0; i<WORKER_THREADS; i++) {
-                workerThing(workerChannels[i]);
+                worker(workerChannels[i]);
             }
         }
       }
@@ -858,7 +866,7 @@ void accelerometer(client interface i2c_master_if i2c, chanend toDist) {
     //get new x-axis tilt value
     int x = read_acceleration(i2c, FXOS8700EQ_OUT_X_MSB);
 
-    //send signal to distributor after first tilt
+    //send signal to init after first tilt
     if (!tilted) {
       if (x>30) {
         tilted = 1 - tilted;
@@ -876,8 +884,6 @@ void accelerometer(client interface i2c_master_if i2c, chanend toDist) {
 
 unsafe int main(void) {
 
-//  char infname[] = "test.pgm";     //put your input image path here
-//  char outfname[] = "testout.pgm"; //put your output image path here
   chan c_inIO, c_outIO, c_control, continueChannel;    //extend your channel definitions here
 
   chan c_buttons[2];
@@ -894,23 +900,19 @@ unsafe int main(void) {
   i2c_master_if i2c[1];
 
   par {
-
+      on tile[0]: showLEDs(p_led, l_interface, 2);
 
       on tile[0]: buttonListener(p_button, c_buttons, b_interface, 2);
-      on tile[0]: showLEDs(p_led, l_interface, 2);
       on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);
-      on tile[0]: accelerometer(i2c[0],c_control);        //client thread reading accelerometer data
+      on tile[0]: accelerometer(i2c[0],c_control);
 
-
-//      on tile[0]: serialServer(cdc_data, serialInterface);
       on tile[0]: controlServer(c_outIO, c_buttons[0], b_interface[0], controlInterface, l_interface[0], c_control, continueChannel, cdc_data);
-      on tile[0]: distributor(c_inIO, c_buttons[1], b_interface[1], l_interface[1], controlInterface, continueChannel);//thread to coordinate work on image
+      on tile[0]: init(c_inIO, c_buttons[1], b_interface[1], l_interface[1], controlInterface, continueChannel);//thread to coordinate work on image
 
       on USB_TILE: xud(c_ep_out, XUD_EP_COUNT_OUT, c_ep_in, XUD_EP_COUNT_IN, null, XUD_SPEED_HS, XUD_PWR_SELF);
       on USB_TILE: Endpoint0(c_ep_out[0], c_ep_in[0]);
       on USB_TILE: CdcEndpointsHandler(c_ep_in[1], c_ep_out[1], c_ep_in[2], cdc_data);
-
-      on USB_TILE: DataManager("test.pgm", "testout.pgm", c_outIO, c_inIO);          //thread to read in a PGM image
+      on USB_TILE: DataManager("test.pgm", "testout.pgm", c_outIO, c_inIO);
 
   }
 
