@@ -10,6 +10,7 @@
 #include <print.h>
 #include <stdlib.h>
 #include <limits.h>
+#include <safestring.h>
 
 #define  IMHT 16
 #define  IMWD 16
@@ -50,6 +51,37 @@ unsigned HOME_CURSOR_CODE_LENGTH = 3;
 char NEW_LINE_CODE[4] = {"\r\n"};
 unsigned NEW_LINE_LENGTH = 4;
 
+char EXPORT_START_MSG[13] = {"exporting..."};
+unsigned EXPORT_START_MSG_LENGTH = 13;
+
+char EXPORT_END_MSG[16] = {"export finished"};
+unsigned EXPORT_END_MSG_LENGTH = 16;
+
+char EXIT_SCREEN_MSG[20] = {"Press 'e' to exit"};
+unsigned EXIT_SCREEN_MSG_LENGTH = 20;
+
+char SERIAL_MENU[7][50] = {
+        {"Game Of Life\r\n"},
+        {"-------------------------\r\n"},
+        {"Press a key to continue:\r\n"},
+        {"i -> print a live image view\r\n"},
+        {"r -> print a live status report \r\n"},
+        {"s -> export the current game image \r\n"},
+        {"-------------------------\r\n"},
+};
+
+unsigned SERIAL_MENU_LENGTH = 50;
+unsigned SERIAL_MENU_ROWS = 7;
+
+char report1[150];
+char report2[150];
+char report3[150];
+char report4[150];
+char report5[150];
+
+
+static unsigned QUICK_START_FLAG = 1;
+
 /*helper functions */
 
 int min(int num1, int num2) {
@@ -60,20 +92,12 @@ int max(int num1, int num2) {
     return num1 > num2 ? num1 : num2;
 }
 
-/**
- * Sends a series of commands across a serial connection to clear the
- * screen connected to the serial port.
- **/
-void clearScreen(client interface usb_cdc_interface cdc) {
-
-    cdc.put_char(27); // ESC command
-
-    cdc.write(CLEAR_SCREEN_CODE, CLEAR_SCREEN_CODE_LENGTH); // clear screen
-
-    cdc.put_char(27); // ESC command
-
-    cdc.write(HOME_CURSOR_CODE, HOME_CURSOR_CODE_LENGTH); // set cursor to the beginning again
-}
+typedef struct BoundingBox {
+   int   left;
+   int   right;
+   int   top;
+   int   bottom;
+} BoundingBox;
 
 typedef interface LEDInterface {
   void setSeparate(int enabled); //set the seperate LED on or off
@@ -91,7 +115,8 @@ void setLEDPattern(out port p, int seperateEn, int red, int green, int blue) {
 /**
  * Controls the LEDs through the LEDInterface
  */
-int showLEDs(out port p, server LEDInterface l_interface[n], unsigned n) {
+[[distributable]]
+void showLEDs(out port p, server LEDInterface l_interface[n], unsigned n) {
 
   int separateEnabled = 0;
   int currentRed = 0;
@@ -114,7 +139,6 @@ int showLEDs(out port p, server LEDInterface l_interface[n], unsigned n) {
       }
 
   }
-  return 0;
 }
 
 typedef interface ButtonInterface {
@@ -156,7 +180,7 @@ void buttonListener(in port button_port, chanend outChan[n], server ButtonInterf
 /**
  * Reads in a pgm file to c_out
  */
-void DataInStream(char infname[], chanend c_out) {
+void DataManager(char infname[], char outfname[], chanend c_in, chanend c_out) {
   int res;
   uchar line[ IMWD ];
   printf( "DataInStream: Start...\n" );
@@ -170,15 +194,46 @@ void DataInStream(char infname[], chanend c_out) {
 
   //Read image line-by-line and send byte by byte to channel c_out
   for( int y = 0; y < IMHT; y++ ) {
+
     _readinline( line, IMWD );
+
     for( int x = 0; x < IMWD; x++ ) {
+
       c_out <: line[ x ];
+
     }
   }
+
 
   //Close PGM image file
   _closeinpgm();
   printf( "DataInStream:Done...\n" );
+
+  //now prepare to write out
+
+  while(1) {
+      c_in :> line[0];
+
+      //Open PGM file
+      printf( "DataOutStream:Start...\n" );
+      res = _openoutpgm( outfname, IMWD, IMHT );
+      if( res ) {
+          printf( "DataOutStream:Error opening %s\n.", outfname );
+          return;
+      }
+
+      //Compile each line of the image and write the image line-by-line
+      for( int y = 0; y < IMHT; y++ ) {
+          for( int x = 0; x < IMWD; x++ ) {
+              c_in :> line[ x ];
+          }
+          _writeoutline( line, IMWD );
+      }
+
+      //Close the PGM image
+      _closeoutpgm();
+      printf( "DataOutStream:Done...\n" );
+  }
   return;
 }
 
@@ -243,7 +298,7 @@ unsafe int getItem(uchar * unsafe inArray, int x, int y) {
 }
 
 /**
- * Returns the value at the given coordinates in the internal array representation of the image.
+ * Sets the value at the given coordinates in the internal array representation of the image.
  */
 unsafe void setItem(uchar * unsafe inArray, int x, int y, int value) {
     ensureBoundedCoordinates(x, y);
@@ -255,12 +310,16 @@ unsafe void setItem(uchar * unsafe inArray, int x, int y, int value) {
     inArray[ucharIndex] ^= (-value ^ inArray[ucharIndex]) & (1 << indexInUchar);
 }
 
-
+/**
+ * Dtermines whether or not the cell at (startX, startY) will live or die this round
+ * based upon its surrounding neighbours.
+ */
 unsafe int makeDecision(uchar * unsafe arr, int startX, int startY) {
 
     int liveNeighbours = 0;
-    for( int y = startY - 1; y <= startY + 1; y++ ) {   //go through all lines
-        for( int x = startX - 1; x <= startX + 1; x++ ) { //go through each pixel per line
+    //go through all of the coordinate's neighbours
+    for( int y = startY - 1; y <= startY + 1; y++ ) {
+        for( int x = startX - 1; x <= startX + 1; x++ ) {
           if (!(x == startX && y == startY)) {
               liveNeighbours += getItem(arr, x, y);
           }
@@ -286,21 +345,76 @@ unsafe int makeDecision(uchar * unsafe arr, int startX, int startY) {
     return live;
 }
 
+//typedef interface SerialInterface {
+//    void writeString(uchar * str, unsigned n);
+//    void writeChar(uchar c);
+//} SerialInterface;
+//
+//unsafe void serialServer(client interface usb_cdc_interface cdc, server interface SerialInterface serialInterface) {
+//    while (1) {
+//        if(cdc.available_bytes()) {
+//            switch (cdc.get_char()) {
+//                default:
+//                    //we've received a message
+//                    break;
+//            }
+//        }
+//        select {
+//            case serialInterface.writeString(uchar * str, unsigned n):
+//                uchar * strOut;
+//                safememcpy(strOut, str, 8*n);
+//                cdc.write(strOut, n);
+//                break;
+//            case serialInterface.writeChar(uchar c):
+//                cdc.put_char(c);
+//                break;
+//
+//        }
+//    }
+//}
 
-typedef struct BoundingBox {
-   int   left;
-   int   right;
-   int   top;
-   int   bottom;
-} BoundingBox;
+/**
+ * Sends a series of commands across a serial connection to clear the
+ * screen connected to the serial port.
+ **/
+void clearScreen(client interface usb_cdc_interface cdc) {
 
+    cdc.put_char(27); // ESC command
+
+    cdc.write(CLEAR_SCREEN_CODE, CLEAR_SCREEN_CODE_LENGTH); // clear screen
+
+    cdc.put_char(27); // ESC command
+
+    cdc.write(HOME_CURSOR_CODE, HOME_CURSOR_CODE_LENGTH); // set cursor to the beginning again
+}
+
+unsafe void exportImage(chanend c_out, uchar * unsafe currentDataPointer, client LEDInterface l_interface) {
+    printf("Received export request\n");
+
+    //with UX in mind we'll light up the LED now
+    l_interface.setColour(0, 0, 1);
+
+
+    printf("starting export process\n");
+    c_out <: '0';
+    for( int y = 0; y < IMHT; y++ ) {   //go through all lines
+         for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
+             uchar value = encode(getItem(currentDataPointer, x, y));
+             c_out <: value;
+         }
+    }
+    printf("ending export process\n");
+
+
+    l_interface.setColour(0,0,0);
+}
 
 typedef interface ControlInterface {
-    void updateStatus(BoundingBox boundingBox, int currentRound, int liveCells);
-    unsigned int getElapsedTime();
-    int isPaused();
-    void setOutputArrayPointer(uchar * unsafe outputArrayPointer);
-    void startTiming();
+    void updateState(BoundingBox boundingBox, int currentRound, int liveCells); //update the current game state
+    unsigned int getElapsedTime(); //return the total current elapsed time in milliseconds
+    int isPaused(); //determine whether or not the game is currently paused
+    void setOutputArrayPointer(uchar * unsafe outputArrayPointer); //set the pointer to last processed round
+    void startTiming(); //call to begin timing. This should be called after the file has been read in
 } ControlInterface;
 
 
@@ -308,6 +422,7 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
   int exporting = 0;
   int paused = 0;
   unsigned pointerSet = 0;
+  unsigned serialState = 0;
   unsigned usbRowLength = IMWD;
 
   BoundingBox currentBoundingBox;
@@ -336,6 +451,11 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
 
   buttonInterface.showInterest();
 
+  //push to the serial port ready for when someone connects
+  for(int i = 0; i < SERIAL_MENU_ROWS; i++) {
+     cdc.write(SERIAL_MENU[i], SERIAL_MENU_LENGTH);
+  }
+
   while(1) {
 
       select {
@@ -349,7 +469,7 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
           case controlInterface.isPaused() -> int returnVal:
               returnVal = paused;
               break;
-          case controlInterface.updateStatus(BoundingBox boundingBox, int round, int liveCells):
+          case controlInterface.updateState(BoundingBox boundingBox, int round, int liveCells):
               currentBoundingBox = boundingBox;
               currentRound = round;
               currentLiveCells = liveCells;
@@ -360,25 +480,11 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
                 break;
           case fromButton :> int buttonType:
               if(buttonType == SW2_CODE && !exporting) {
-                  printf("Received export request\n");
-
-                  //with UX in mind we'll light up the LED now
-                  l_interface.setColour(0, 0, 1);
-
                   exporting = 1;
-                  printf("starting export process\n");
-                  c_out <: '0';
-                  for( int y = 0; y < IMHT; y++ ) {   //go through all lines
-                       for( int x = 0; x < IMWD; x++ ) { //go through each pixel per line
-                           uchar value = encode(getItem(currentDataPointer, x, y));
-                           c_out <: value;
-                       }
-                  }
-                  printf("ending export process\n");
+                  exportImage(c_out, currentDataPointer, l_interface);
                   exporting = 0;
-
-                  l_interface.setColour(0,0,0);
               }
+              //re-register interest
               buttonInterface.showInterest();
               break;
           case fromAcc :> paused:
@@ -405,6 +511,7 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
           case !paused && !exporting => continueChannel :> int data:
               break;
           case time when timerafter(periodInc) :> unsigned thisTime:
+
               deciCounter++;
               periodInc += period;
 
@@ -415,21 +522,83 @@ unsafe void controlServer(chanend c_out, chanend fromButton, client ButtonInterf
               lastTime = thisTime;
 
               //usb drawing section
-              if (!paused && thisTime > framePeriodInc && pointerSet) {
-                    framePeriodInc += framePeriod;
-                    cdc.write(NEW_LINE_CODE, NEW_LINE_LENGTH);
-                    clearScreen(cdc);
-                    for( int y = 0; y < IMHT; y++ ) {
-                         for( int x = 0; x < IMWD; x++ ) {
-                             int baseItem = getItem(currentDataPointer, x, y);
-                             uchar value = baseItem == 0 ? '0' : '1';
-                             usbRow[x] = value;
-                         }
-                         cdc.write(usbRow, usbRowLength);
-                         cdc.write(NEW_LINE_CODE, NEW_LINE_LENGTH);
-                    }
+              if(serialState && !paused && thisTime > framePeriodInc && pointerSet){
+                  switch (serialState) {
+                  case 2: //live image view
+                      framePeriodInc += framePeriod;
+                      cdc.write(NEW_LINE_CODE, NEW_LINE_LENGTH);
+                      clearScreen(cdc);
+                      for( int y = 0; y < IMHT; y++ ) {
+                           for( int x = 0; x < IMWD; x++ ) {
+                               int baseItem = getItem(currentDataPointer, x, y);
+                               uchar value = baseItem == 0 ? '0' : '1';
+                               usbRow[x] = value;
+                           }
+                           cdc.write(usbRow, usbRowLength);
+                           cdc.write(NEW_LINE_CODE, NEW_LINE_LENGTH);
+                      }
+
+                      cdc.write(EXIT_SCREEN_MSG, EXIT_SCREEN_MSG_LENGTH);
+                      break;
+                  case 3: //live status
+                      clearScreen(cdc);
+                      unsigned maxLength = 150;
+
+
+                      unsigned pauseStartTime = 1000 * 42 * totalClockCycles + deciCounter * 100;
+                      unsigned int elapsedTime =  pauseStartTime - startTime - totalLostTime;
+                      int boundingPixels = (currentBoundingBox.right - currentBoundingBox.left + 3) * (currentBoundingBox.bottom - currentBoundingBox.top + 3);
+                      int totalPixels = IMWD * IMHT;
+
+                      sprintf(report1, "Round = %d\r\n", currentRound);
+                      cdc.write(report1, maxLength);
+                      sprintf(report2, "Total live cells = %d\r\n", currentLiveCells);
+                      cdc.write(report2, maxLength);
+                      sprintf(report3, "Bounding box between points (%d,%d) and (%d,%d) means we're only processing %d out of %d pixels\r\n",currentBoundingBox.left, currentBoundingBox.top, currentBoundingBox.right, currentBoundingBox.bottom, boundingPixels, totalPixels);
+                      cdc.write(report3, maxLength);
+                      sprintf(report4, "Total processing time: %d ms\r\n", elapsedTime);
+                      cdc.write(report4, maxLength);
+                      sprintf(report5, "Total Processing throughput after %d rounds is %u ms per round.\r\n",currentRound, elapsedTime/currentRound);
+                      cdc.write(report5, maxLength);
+
+                      cdc.write(EXIT_SCREEN_MSG, EXIT_SCREEN_MSG_LENGTH);
+                      break;
+
+                  }
+
+
+
               }
               break;
+      }
+      if(cdc.available_bytes()) {
+          uchar charValue = cdc.get_char();
+          switch (charValue) {
+
+          case 'i': //i(mage)
+              serialState = 2;
+              break;
+          case 'r': //r(eport)
+              serialState = 3;
+              break;
+          case 's': //s(ave)
+              if(!exporting) {
+                  exporting = 1;
+                  cdc.write(EXPORT_START_MSG, EXPORT_START_MSG_LENGTH);
+                  exportImage(c_out, currentDataPointer, l_interface);
+                  cdc.write(EXPORT_END_MSG, EXPORT_END_MSG_LENGTH);
+                  exporting = 0;
+              }
+              break;
+          case 'e': //e(xit)
+          default:
+              serialState = 1;
+              clearScreen(cdc);
+              for(int i = 0; i < SERIAL_MENU_ROWS; i++) {
+                  cdc.write(SERIAL_MENU[i], SERIAL_MENU_LENGTH);
+              }
+              break;
+          }
       }
   }
 }
@@ -491,7 +660,7 @@ unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outA
   int totalLiveCells = 1;
 
   controlInterface.setOutputArrayPointer(inArrayPointer);
-  controlInterface.updateStatus(roundBoundingBox, 0, 0);
+  controlInterface.updateState(roundBoundingBox, 0, 0);
 
   while (totalLiveCells) {
       roundNumber++;
@@ -599,7 +768,7 @@ unsafe void distributorServer(uchar * unsafe inArrayPointer, uchar * unsafe outA
 
       controlInterface.setOutputArrayPointer(inArrayPointer);
       //update the control interface's current data pointer incase it wants to export what we have so far
-      controlInterface.updateStatus(roundBoundingBox, roundNumber, totalLiveCells);
+      controlInterface.updateState(roundBoundingBox, roundNumber, totalLiveCells);
 
   }
 
@@ -617,9 +786,11 @@ unsafe void distributor(chanend c_in, chanend fromButton, client ButtonInterface
   //wait for SW1 to be pressed
   int buttonData = 0;
 
-  buttonInterface.showInterest();
-  while (buttonData != SW1_CODE) {
-      fromButton :> buttonData;
+  if(!QUICK_START_FLAG) {
+      buttonInterface.showInterest();
+      while (buttonData != SW1_CODE) {
+          fromButton :> buttonData;
+      }
   }
 
   l_interface.setColour(0,1,0);
@@ -674,37 +845,6 @@ unsafe void distributor(chanend c_in, chanend fromButton, client ButtonInterface
 
 
 
-}
-
-
-void DataOutStream(char outfname[], chanend c_in) {
-  int res;
-  uchar line[ IMWD ];
-
-  while(1) {
-      c_in :> line[0];
-
-      //Open PGM file
-      printf( "DataOutStream:Start...\n" );
-      res = _openoutpgm( outfname, IMWD, IMHT );
-      if( res ) {
-        printf( "DataOutStream:Error opening %s\n.", outfname );
-        return;
-      }
-
-      //Compile each line of the image and write the image line-by-line
-      for( int y = 0; y < IMHT; y++ ) {
-        for( int x = 0; x < IMWD; x++ ) {
-          c_in :> line[ x ];
-        }
-        _writeoutline( line, IMWD );
-      }
-
-      //Close the PGM image
-      _closeoutpgm();
-      printf( "DataOutStream:Done...\n" );
-  }
-  return;
 }
 
 
@@ -772,19 +912,24 @@ unsafe int main(void) {
   i2c_master_if i2c[1];
 
   par {
-      on USB_TILE: xud(c_ep_out, XUD_EP_COUNT_OUT, c_ep_in, XUD_EP_COUNT_IN, null, XUD_SPEED_HS, XUD_PWR_SELF);
-      on USB_TILE: Endpoint0(c_ep_out[0], c_ep_in[0]);
-      on USB_TILE: CdcEndpointsHandler(c_ep_in[1], c_ep_out[1], c_ep_in[2], cdc_data);
-      on USB_TILE: DataOutStream("testout.pgm", c_outIO);       //thread to write out a PGM image
-      on USB_TILE: DataInStream("test.pgm", c_inIO);          //thread to read in a PGM image
+
 
       on tile[0]: buttonListener(p_button, c_buttons, b_interface, 2);
       on tile[0]: showLEDs(p_led, l_interface, 2);
       on tile[0]: i2c_master(i2c, 1, p_scl, p_sda, 10);
       on tile[0]: accelerometer(i2c[0],c_control);        //client thread reading accelerometer data
 
+
+//      on tile[0]: serialServer(cdc_data, serialInterface);
       on tile[0]: controlServer(c_outIO, c_buttons[0], b_interface[0], controlInterface, l_interface[0], c_control, continueChannel, cdc_data);
       on tile[0]: distributor(c_inIO, c_buttons[1], b_interface[1], l_interface[1], controlInterface, continueChannel);//thread to coordinate work on image
+
+      on USB_TILE: xud(c_ep_out, XUD_EP_COUNT_OUT, c_ep_in, XUD_EP_COUNT_IN, null, XUD_SPEED_HS, XUD_PWR_SELF);
+      on USB_TILE: Endpoint0(c_ep_out[0], c_ep_in[0]);
+      on USB_TILE: CdcEndpointsHandler(c_ep_in[1], c_ep_out[1], c_ep_in[2], cdc_data);
+
+      on USB_TILE: DataManager("test.pgm", "testout.pgm", c_outIO, c_inIO);          //thread to read in a PGM image
+
   }
 
   return 0;
