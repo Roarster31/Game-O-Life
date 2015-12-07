@@ -11,8 +11,8 @@
 #include <limits.h>
 #include <safestring.h>
 
-#define  IMHT 16
-#define  IMWD 16
+#define  IMHT 64
+#define  IMWD 40
 
 #define  WORKER_THREADS 4
 
@@ -912,7 +912,7 @@ unsafe int main(void) {
       on USB_TILE: xud(c_ep_out, XUD_EP_COUNT_OUT, c_ep_in, XUD_EP_COUNT_IN, null, XUD_SPEED_HS, XUD_PWR_SELF);
       on USB_TILE: Endpoint0(c_ep_out[0], c_ep_in[0]);
       on USB_TILE: CdcEndpointsHandler(c_ep_in[1], c_ep_out[1], c_ep_in[2], cdc_data);
-      on USB_TILE: DataManager("test.pgm", "testout.pgm", c_outIO, c_inIO);
+      on USB_TILE: DataManager("40x64.pgm", "testout.pgm", c_outIO, c_inIO);
 
   }
 
